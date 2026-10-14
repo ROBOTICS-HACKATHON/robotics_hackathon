@@ -21,3 +21,9 @@ report*.json
 examples/*.json
 examples/[0-9][0-9][0-9]-*.png
 examples/failed_runs/
+
+# Cloudflare Worker (cloudflare/)
+cloudflare/node_modules/
+cloudflare/.wrangler/
+cloudflare/dist/
+cloudflare/.dev.vars

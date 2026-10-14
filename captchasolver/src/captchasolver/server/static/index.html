@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Captcha Solver</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1b1f27; --muted: #5d6675; --line: #dfe3ea;
+    --accent: #1a73e8; --accent-ink: #ffffff; --ok: #1e8e3e; --bad: #d93025; --warn: #b06000;
+    --ok-bg: #e6f4ea; --bad-bg: #fce8e6; --warn-bg: #fef3e0; --code: #f0f2f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151a; --card: #1b2028; --ink: #e8eaed; --muted: #a0a8b5; --line: #2f3641;
+      --accent: #6aa9ff; --accent-ink: #0b1220; --ok: #6fd18a; --bad: #ff8a80; --warn: #f2b45e;
+      --ok-bg: #16301f; --bad-bg: #3a1c1a; --warn-bg: #36280f; --code: #12151a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+  .bar { max-width: 1100px; margin: 0 auto; padding: 0 16px; display: flex; align-items: center;
+         gap: 16px; min-height: 56px; flex-wrap: wrap; }
+  h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+  nav { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
+  nav a { padding: 8px 12px; border-radius: 8px; color: var(--muted); text-decoration: none; font-weight: 550; }
+  nav a[aria-current="page"] { background: var(--code); color: var(--ink); }
+  nav a:hover { color: var(--ink); }
+  .pill { font-size: 13px; padding: 4px 10px; border-radius: 99px; border: 1px solid var(--line);
+          color: var(--muted); text-decoration: none; display: inline-flex; gap: 6px; align-items: center; }
+  .pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); display: inline-block; }
+  .pill.set i { background: var(--ok); }
+  @media (max-width: 640px) {
+    .bar { gap: 8px 12px; padding-top: 8px; padding-bottom: 6px; }
+    nav { order: 3; width: 100%; flex: none; overflow-x: auto; flex-wrap: nowrap; }
+    .pill { margin-left: auto; }
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; }
+  section[hidden] { display: none; }
+  h2 { font-size: 20px; margin: 4px 0 4px; letter-spacing: -.01em; }
+  p.lead { color: var(--muted); margin: 0 0 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 12px; }
+  label { display: block; font-size: 13px; color: var(--muted); font-weight: 550; margin-bottom: 4px; }
+  input[type=text], input[type=password], input[type=number], select {
+    width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--ink); font: inherit; }
+  input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; font-weight: 600; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--card); color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.danger { color: var(--bad); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .muted { color: var(--muted); } .small { font-size: 13px; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+  .notice { padding: 10px 12px; border-radius: 8px; font-size: 14px; margin: 12px 0 0; }
+  .notice.ok { background: var(--ok-bg); } .notice.bad { background: var(--bad-bg); } .notice.warn { background: var(--warn-bg); }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 12px;
+        overflow: auto; max-height: 320px; margin: 8px 0 0; }
+  .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 28px 16px; text-align: center;
+          color: var(--muted); cursor: pointer; }
+  .drop.over, .drop:focus-visible { border-color: var(--accent); color: var(--ink); }
+  canvas { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); display: block; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .stat { display: flex; gap: 20px; flex-wrap: wrap; margin: 4px 0 8px; }
+  .stat b { font-size: 26px; display: block; line-height: 1.1; }
+  .bar-track { height: 10px; background: var(--code); border-radius: 99px; overflow: hidden; border: 1px solid var(--line); }
+  .bar-fill { height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+  #log { max-height: 340px; overflow: auto; font-size: 13.5px; border: 1px solid var(--line); border-radius: 8px; }
+  #log div { padding: 5px 10px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+  #log div:last-child { border-bottom: 0; }
+  .chip { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: 13px; border: 1px solid var(--line); margin: 0 6px 6px 0; }
+  .chip.ok { background: var(--ok-bg); } .chip.bad { background: var(--bad-bg); }
+  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink);
+           padding: 16px; width: min(1100px, 96vw); }
+  dialog::backdrop { background: rgba(0,0,0,.55); }
+  dialog img { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  .link { background: none; border: 0; padding: 0; color: var(--accent); font-weight: 550; cursor: pointer; text-decoration: underline; }
+  details summary { cursor: pointer; font-weight: 600; }
+  dialog { max-height: 94vh; overflow: auto; }
+  dialog figure img { cursor: zoom-in; }
+  dialog figure.zoom { grid-column: 1 / -1; }
+  dialog figure.zoom img { cursor: zoom-out; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>Captcha Solver</h1>
+    <nav aria-label="Sections">
+      <a href="#solve">Solve</a><a href="#tests">Tests</a><a href="#api">API</a><a href="#settings">Settings</a>
+    </nav>
+    <a class="pill" id="credpill" href="#settings"><i></i><span>No credentials</span></a>
+  </div>
+</header>
+
+<main>
+  <!-- ------------------------------------------------------------------ Solve -->
+  <section id="solve" hidden>
+    <h2>Solve a screenshot</h2>
+    <p class="lead">Drop in a screenshot of the challenge. You get the target, the tiles to click and a click script.</p>
+    <div class="grid2">
+      <div class="card">
+        <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose or drop a screenshot">
+          <strong>Drop a screenshot here</strong><br>
+          <span class="small">or click to choose a file, or paste with Ctrl+V</span>
+        </div>
+        <input type="file" id="file" accept="image/png,image/jpeg" hidden>
+        <p class="small muted" id="filename" aria-live="polite">No image selected.</p>
+        <div class="fields">
+          <div><label for="layout">Image shows</label>
+            <select id="layout"><option value="screenshot">Whole screen</option>
+              <option value="grid">Only the grid</option></select></div>
+          <div><label for="target">Target (optional)</label>
+            <input type="text" id="target" placeholder="read from banner" autocomplete="off"></div>
+          <div><label for="gridsize">Grid</label>
+            <select id="gridsize"><option>3x3</option><option>4x4</option><option>2x2</option><option>5x5</option></select></div>
+        </div>
+        <div class="row" style="margin-top:14px">
+          <button class="primary" id="solvebtn" disabled>Solve</button>
+          <span class="small muted" id="solvestatus" role="status" aria-live="polite"></span>
+        </div>
+        <div id="solveerr"></div>
+      </div>
+      <div class="card" id="resultcard" hidden>
+        <canvas id="canvas" aria-label="Screenshot with the solver's picks drawn on it"></canvas>
+        <label class="row" style="color:var(--ink);font-weight:500;gap:8px;margin:8px 0 0">
+          <input type="checkbox" id="zoom" checked> Zoom to the dialog</label>
+        <p class="small muted" style="margin:8px 0 0">
+          <span class="ok">■</span> picked tile &nbsp; <span class="bad">■</span> not picked &nbsp;
+          <span class="warn">●</span> Verify point
+        </p>
+      </div>
+    </div>
+    <div class="card" id="detail" hidden>
+      <div class="stat">
+        <div><b id="r-target">–</b><span class="muted small">target</span></div>
+        <div><b id="r-count">–</b><span class="muted small">tiles to click</span></div>
+        <div><b id="r-secs">–</b><span class="muted small">seconds</span></div>
+      </div>
+      <p class="small muted" id="r-model"></p>
+      <table id="r-actions"><thead><tr><th>#</th><th>Action</th><th>Tile (row, col)</th><th>Pixels</th><th>Normalised</th></tr></thead><tbody></tbody></table>
+      <div class="row" style="margin-top:12px">
+        <button id="copyjson">Copy JSON</button><button id="dljson">Download JSON</button>
+      </div>
+      <details style="margin-top:10px"><summary>Full JSON</summary><pre id="r-json"></pre></details>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ Tests -->
+  <section id="tests" hidden>
+    <h2>Run tests</h2>
+    <p class="lead">Runs the solver against the demo site: it screenshots each challenge, clicks, and checks the result.
+      Results stay in server memory only. Download them to keep them.</p>
+    <div class="card">
+      <div class="fields">
+        <div><label for="t-count">Challenges</label><input type="number" id="t-count" value="100" min="1" max="200"></div>
+        <div><label for="t-split">Split</label>
+          <select id="t-split"><option value="all">All</option><option value="train">Train</option><option value="test">Test</option></select></div>
+        <div><label for="t-seed">Seed</label><input type="number" id="t-seed" value="0" min="0"></div>
+        <div><label for="t-conc" title="More pages is faster but needs more CPU and memory in the container. 3 is a safe default.">Parallel pages</label><input type="number" id="t-conc" value="3" min="1" max="8"></div>
+        <div><label for="t-pipe" title="Screenshot: full-screen capture, clicks with the mouse, like the robot. Per tile: tests only the vision model.">Pipeline</label>
+          <select id="t-pipe"><option value="screenshot">Screenshot</option>
+            <option value="dom">Per tile</option></select></div>
+        <div><label for="t-view">Viewport</label><input type="text" id="t-view" value="1914x1080"></div>
+        <div><label for="t-dpr">Pixel ratio</label><input type="number" id="t-dpr" value="1" min="1" max="3" step="0.5"></div>
+        <div><label for="t-model">Model</label><select id="t-model"></select></div>
+        <div><label for="t-url">Site</label><select id="t-url"></select></div>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button class="primary" id="t-start">Start</button>
+        <button class="danger" id="t-stop" disabled>Stop</button>
+        <span class="small muted" id="t-status" role="status" aria-live="polite"></span>
+      </div>
+      <div id="t-err"></div>
+    </div>
+
+    <div class="card" id="t-live" hidden>
+      <div class="stat">
+        <div><b id="c-pass" class="ok">0</b><span class="muted small">✅ passed</span></div>
+        <div><b id="c-fail" class="bad">0</b><span class="muted small">❌ failed</span></div>
+        <div><b id="c-err" class="warn">0</b><span class="muted small">💥 errors</span></div>
+        <div><b id="c-prog">0 / 0</b><span class="muted small">done</span></div>
+      </div>
+      <div class="bar-track" role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" id="t-bar">
+        <div class="bar-fill" id="t-fill"></div></div>
+      <div id="log" style="margin-top:12px" aria-live="off"></div>
+    </div>
+
+    <div class="card" id="t-summary" hidden>
+      <h2 style="margin-bottom:8px">Results</h2>
+      <div id="t-headline" class="stat"></div>
+      <p class="small" id="t-metrics"></p>
+      <div id="t-subjects" style="margin:8px 0"></div>
+      <div class="row" id="t-downloads" style="margin:10px 0"></div>
+      <h3 style="font-size:16px;margin:14px 0 6px" id="t-fail-title"></h3>
+      <table id="t-fails" hidden><thead><tr><th>Challenge</th><th>Subject</th><th>Why</th><th>Images</th></tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ API -->
+  <section id="api" hidden>
+    <h2>API</h2>
+    <p class="lead">Everything the UI does is available over HTTP. Interactive docs: <a id="docslink" href="/api/docs">/api/docs</a>.</p>
+    <div class="card">
+      <h3 style="margin-top:0">Authentication</h3>
+      <p>Access to this app is controlled by Cloudflare Access. Scripts and the robot should use an
+        <strong>Access service token</strong> and send <code>CF-Access-Client-Id</code> and <code>CF-Access-Client-Secret</code>.
+        Your Cloudflare credentials go in two headers on every call. They are never stored by the server.</p>
+      <pre id="api-curl"></pre>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Endpoint</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>POST /api/solve</code></td><td>Multipart <code>image</code> (+ <code>layout</code>, <code>target</code>, <code>grid</code>, <code>model</code>). Returns target, tiles and <code>actions</code>.</td></tr>
+          <tr><td><code>POST /api/preflight</code></td><td>Check that a model can read an image with your credentials.</td></tr>
+          <tr><td><code>GET /api/models</code></td><td>Candidate vision models and the default.</td></tr>
+          <tr><td><code>POST /api/tests</code></td><td>Start a run (JSON). Returns an id.</td></tr>
+          <tr><td><code>GET /api/tests/{id}/events</code></td><td>Server-sent events: <code>start</code>, <code>record</code>, <code>summary</code>, <code>end</code>.</td></tr>
+          <tr><td><code>GET /api/tests/{id}</code></td><td>Current state and records.</td></tr>
+          <tr><td><code>POST /api/tests/{id}/cancel</code></td><td>Stop a run, keeping partial results.</td></tr>
+          <tr><td><code>GET /api/tests/{id}/report.json</code> · <code>failed_runs.zip</code></td><td>Downloads.</td></tr>
+          <tr><td><code>GET /api/health</code></td><td>Limits and allowed test hosts.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ Settings -->
+  <section id="settings" hidden>
+    <h2>Settings</h2>
+    <p class="lead">Your Cloudflare credentials, used to call Workers AI.</p>
+    <div class="card" style="max-width:640px">
+      <div style="margin-bottom:12px"><label for="s-acct">Account ID</label>
+        <input type="text" id="s-acct" autocomplete="off" spellcheck="false" placeholder="32 hex characters"></div>
+      <div style="margin-bottom:12px"><label for="s-token">API token</label>
+        <div class="row" style="flex-wrap:nowrap">
+          <input type="password" id="s-token" autocomplete="off" spellcheck="false" placeholder="Workers AI token">
+          <button type="button" id="s-show" aria-pressed="false">Show</button></div></div>
+      <div style="margin-bottom:12px"><label for="s-model">Default model</label><select id="s-model"></select></div>
+      <label class="row" style="color:var(--ink);font-weight:500;gap:8px;margin:0 0 12px">
+        <input type="checkbox" id="s-remember"> Remember on this device</label>
+      <div class="row">
+        <button class="primary" id="s-save">Save</button>
+        <button id="s-test">Test connection</button>
+        <button class="danger" id="s-clear">Clear</button>
+      </div>
+      <div id="s-msg" role="status" aria-live="polite"></div>
+      <div class="notice warn small">
+        Credentials stay in <strong>your browser</strong> (this tab only, unless you tick “Remember”). They are sent over
+        HTTPS with each request, kept in server memory only while a run uses them, and never logged or stored.
+        Use a token limited to <em>Workers AI</em> and revoke it when you are done.
+      </div>
+    </div>
+  </section>
+</main>
+
+<dialog id="viewer" aria-label="Failure details">
+  <div class="row" style="justify-content:space-between;margin-bottom:8px">
+    <strong id="v-title"></strong>
+    <div class="row"><button id="v-prev" aria-label="Previous failure">←</button>
+      <button id="v-next" aria-label="Next failure">→</button><button id="v-close">Close</button></div>
+  </div>
+  <p id="v-cause" class="small"></p>
+  <p class="small muted" style="margin-top:-6px">Click an image to enlarge it.</p>
+  <div class="grid2">
+    <figure id="v-fig-state" style="margin:0"><figcaption class="small muted">What the page looked like after the failed Verify</figcaption><img id="v-state" alt="Page state after the failure"></figure>
+    <figure id="v-fig-plan" style="margin:0"><figcaption class="small muted">What the solver planned (green = picked)</figcaption><img id="v-plan" alt="The solver's plan drawn on its screenshot"></figure>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+function el(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (k === "class") e.className = v; else if (k === "text") e.textContent = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v);
+  }
+  for (const kid of kids) e.append(kid);
+  return e;
+}
+const notice = (kind, text) => el("div", { class: `notice ${kind}`, text });
+function show(box, kind, text) { box.replaceChildren(text ? notice(kind, text) : ""); }
+
+/* ------------------------------------------------------------ credentials (browser only) */
+const Creds = {
+  load() {
+    for (const store of [localStorage, sessionStorage]) {
+      try { const v = JSON.parse(store.getItem("cs.creds") || "null"); if (v && v.account && v.token) return { ...v, remembered: store === localStorage }; } catch {}
+    }
+    return null;
+  },
+  save(account, token, remember) {
+    this.clear();
+    try { (remember ? localStorage : sessionStorage).setItem("cs.creds", JSON.stringify({ account, token })); } catch {}
+  },
+  clear() { try { localStorage.removeItem("cs.creds"); sessionStorage.removeItem("cs.creds"); } catch {} },
+  headers() { const c = this.load(); return c ? { "X-CF-Account-Id": c.account, "X-CF-Api-Token": c.token } : {}; },
+};
+const prefs = {
+  get(k, d) { try { return localStorage.getItem("cs." + k) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("cs." + k, v); } catch {} },
+};
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { ...Creds.headers(), ...(opts.headers || {}) } });
+  const ct = res.headers.get("content-type") || "";
+  const body = ct.includes("json") ? await res.json() : await res.text();
+  if (!res.ok) {
+    let msg = typeof body === "string" ? body : body.detail;
+    if (Array.isArray(msg)) msg = msg.map((m) => `${(m.loc || []).slice(1).join(".")}: ${m.msg}`).join("; ");
+    const err = new Error(msg || `Request failed (${res.status})`); err.status = res.status; throw err;
+  }
+  return body;
+}
+function needCreds(box) {
+  if (Creds.load()) return false;
+  box.replaceChildren(notice("warn", "Add your Cloudflare account ID and API token in Settings first."));
+  return true;
+}
+function updatePill() {
+  const set = !!Creds.load();
+  $("credpill").classList.toggle("set", set);
+  $("credpill").querySelector("span").textContent = set ? "Credentials set" : "No credentials";
+}
+
+/* ------------------------------------------------------------ routing */
+const ROUTES = ["solve", "tests", "api", "settings"];
+function route() {
+  const name = ROUTES.includes(location.hash.slice(1)) ? location.hash.slice(1) : (Creds.load() ? "solve" : "settings");
+  for (const r of ROUTES) $(r).hidden = r !== name;
+  document.querySelectorAll("nav a").forEach((a) => { if (a.getAttribute("href") === "#" + name) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+  document.title = `${name[0].toUpperCase() + name.slice(1)} · Captcha Solver`;
+}
+addEventListener("hashchange", route);
+
+/* ------------------------------------------------------------ settings */
+let MODELS = [];
+function fillModels(select, selected) {
+  select.replaceChildren(...MODELS.map((m) => el("option", { value: m.id, text: m.id.replace("@cf/", "") + (m.default ? "  (default)" : "") })));
+  select.value = MODELS.some((m) => m.id === selected) ? selected : (MODELS.find((m) => m.default) || MODELS[0] || {}).id;
+}
+function initSettings() {
+  const c = Creds.load();
+  if (c) { $("s-acct").value = c.account; $("s-token").value = c.token; $("s-remember").checked = c.remembered; }
+  $("s-show").onclick = () => {
+    const hidden = $("s-token").type === "password";
+    $("s-token").type = hidden ? "text" : "password";
+    $("s-show").textContent = hidden ? "Hide" : "Show"; $("s-show").setAttribute("aria-pressed", String(hidden));
+  };
+  const read = () => ({ account: $("s-acct").value.trim().toLowerCase(), token: $("s-token").value.trim() });
+  const valid = ({ account, token }) => {
+    if (!/^[0-9a-f]{32}$/.test(account)) return "The account ID should be 32 hex characters (Cloudflare dashboard → Workers AI).";
+    if (!/^[A-Za-z0-9_.\-]{20,300}$/.test(token)) return "That doesn't look like an API token.";
+    return "";
+  };
+  $("s-save").onclick = () => {
+    const v = read(), bad = valid(v);
+    if (bad) return show($("s-msg"), "bad", bad);
+    Creds.save(v.account, v.token, $("s-remember").checked); prefs.set("model", $("s-model").value);
+    updatePill(); show($("s-msg"), "ok", $("s-remember").checked ? "Saved on this device." : "Saved for this tab.");
+  };
+  $("s-clear").onclick = () => {
+    Creds.clear(); $("s-acct").value = ""; $("s-token").value = ""; $("s-remember").checked = false;
+    updatePill(); show($("s-msg"), "ok", "Credentials removed from this browser.");
+  };
+  $("s-test").onclick = async () => {
+    const v = read(), bad = valid(v);
+    if (bad) return show($("s-msg"), "bad", bad);
+    Creds.save(v.account, v.token, $("s-remember").checked); updatePill();
+    $("s-test").disabled = true; show($("s-msg"), "warn", "Asking the model to read a test image…");
+    try {
+      const r = await api("/api/preflight", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: $("s-model").value }) });
+      show($("s-msg"), r.ok ? "ok" : "bad", r.ok ? `Works. The model read “${r.answer}” in ${r.seconds}s.` : (r.advice || `The model did not answer: ${r.error}`));
+    } catch (e) { show($("s-msg"), "bad", e.message); } finally { $("s-test").disabled = false; }
+  };
+  $("s-model").onchange = () => prefs.set("model", $("s-model").value);
+}
+
+/* ------------------------------------------------------------ solve */
+let chosen = null, lastResult = null, lastImage = null;
+function setFile(f) {
+  if (!f) return;
+  if (!/^image\/(png|jpeg)$/.test(f.type)) return show($("solveerr"), "bad", "Please use a PNG or JPEG image.");
+  chosen = f; show($("solveerr"), "", ""); $("filename").textContent = `${f.name || "pasted image"} (${Math.round(f.size / 1024)} KB)`;
+  $("solvebtn").disabled = false;
+}
+function initSolve() {
+  const drop = $("drop");
+  drop.onclick = () => $("file").click();
+  drop.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("file").click(); } };
+  $("file").onchange = (e) => setFile(e.target.files[0]);
+  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); setFile(e.dataTransfer.files[0]); };
+  addEventListener("paste", (e) => {
+    if ($("solve").hidden) return;
+    const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith("image/"));
+    if (item) setFile(item.getAsFile());
+  });
+  $("solvebtn").onclick = solve;
+  $("zoom").onchange = paintCanvas;
+  $("copyjson").onclick = async () => { await navigator.clipboard.writeText($("r-json").textContent); $("copyjson").textContent = "Copied"; setTimeout(() => ($("copyjson").textContent = "Copy JSON"), 1200); };
+  $("dljson").onclick = () => {
+    const a = el("a", { href: URL.createObjectURL(new Blob([$("r-json").textContent], { type: "application/json" })), download: "solution.json" });
+    a.click(); URL.revokeObjectURL(a.href);
+  };
+}
+async function solve() {
+  if (needCreds($("solveerr")) || !chosen) return;
+  const fd = new FormData();
+  fd.append("image", chosen); fd.append("layout", $("layout").value); fd.append("grid", $("gridsize").value);
+  fd.append("model", prefs.get("model", "") || (MODELS.find((m) => m.default) || {}).id);
+  if ($("target").value.trim()) fd.append("target", $("target").value.trim());
+  $("solvebtn").disabled = true; $("solvestatus").textContent = "Solving…"; show($("solveerr"), "", "");
+  try {
+    lastResult = await api("/api/solve", { method: "POST", body: fd });
+    lastImage = await createImageBitmap(chosen);
+    renderSolve(lastResult); $("solvestatus").textContent = "";
+  } catch (e) {
+    $("solvestatus").textContent = ""; show($("solveerr"), "bad", e.message);
+    if (e.status === 401) location.hash = "#settings";
+  } finally { $("solvebtn").disabled = false; }
+}
+let fullCanvas = null;
+function paintCanvas() {
+  if (!fullCanvas || !lastResult) return;
+  const [gx, gy, gw] = lastResult.grid_box, W = fullCanvas.width, H = fullCanvas.height;
+  let sx = 0, sy = 0, sw = W, sh = H;
+  if ($("zoom").checked) {   // the banner sits above the grid and Verify below it
+    sx = Math.max(0, gx - 0.06 * gw); sy = Math.max(0, gy - 0.40 * gw);
+    sw = Math.min(W, gx + 1.06 * gw) - sx; sh = Math.min(H, gy + lastResult.grid_box[3] + 0.22 * gw) - sy;
+  }
+  const out = $("canvas"); out.width = Math.round(sw); out.height = Math.round(sh);
+  out.getContext("2d").drawImage(fullCanvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+}
+function renderSolve(r) {
+  const [gx, gy, gw, gh] = r.grid_box, [rows, cols] = $("gridsize").value.split("x").map(Number);
+  const W = r.image_size[0], H = r.image_size[1];
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const g = cv.getContext("2d"); g.drawImage(lastImage, 0, 0, W, H);
+  const lw = Math.max(2, W / 600), picked = new Set(r.tiles);
+  g.lineWidth = lw; g.strokeStyle = "#e91e63"; g.strokeRect(gx, gy, gw, gh);
+  g.font = `${Math.round(Math.max(12, W / 70))}px sans-serif`;
+  for (let i = 0; i < rows * cols; i++) {
+    const row = Math.floor(i / cols), col = i % cols, x = gx + col * gw / cols, y = gy + row * gh / rows, on = picked.has(i);
+    g.strokeStyle = on ? "#1ed760" : "#ff5252"; g.lineWidth = on ? lw * 2 : lw / 2;
+    if (on) { g.fillStyle = "rgba(30,215,96,.18)"; g.fillRect(x, y, gw / cols, gh / rows); }
+    g.strokeRect(x, y, gw / cols, gh / rows);
+    g.fillStyle = on ? "#1ed760" : "#ff5252"; g.fillText(String(i + 1), x + 8, y + 8 + parseInt(g.font));
+  }
+  g.lineWidth = lw * 1.5;
+  r.actions.forEach((a) => {
+    g.strokeStyle = a.role === "verify" ? "#ff9800" : "#1ed760";
+    g.beginPath(); g.arc(a.x, a.y, Math.max(8, W / 140), 0, 7); g.stroke();
+  });
+  fullCanvas = cv; paintCanvas();
+  $("resultcard").hidden = false; $("detail").hidden = false;
+  $("r-target").textContent = r.target; $("r-count").textContent = String(r.tiles.length);
+  $("r-secs").textContent = String(r.seconds); $("r-model").textContent = `Model: ${r.model}`;
+  const tb = $("r-actions").tBodies[0]; tb.replaceChildren();
+  r.actions.forEach((a, i) => {
+    const where = a.role === "tile" ? `${Math.floor(a.tile / cols) + 1}, ${a.tile % cols + 1}` : "";
+    tb.append(el("tr", {}, el("td", { text: String(i + 1) }), el("td", { text: a.role === "verify" ? "click Verify" : `click tile ${a.tile + 1}` }),
+      el("td", { text: where }), el("td", { text: `${a.x}, ${a.y}` }), el("td", { text: `${a.x_norm.toFixed(4)}, ${a.y_norm.toFixed(4)}` })));
+  });
+  if (r.layout === "grid") $("r-actions").after(el("p", { class: "small muted", text: "Grid-only image: there is no Verify button to click." }));
+  $("r-json").textContent = JSON.stringify(r, null, 2);
+}
+
+/* ------------------------------------------------------------ tests */
+let es = null, run = null, seen = new Map(), cur = { failures: [] };
+const sessionGet = (k) => { try { return sessionStorage.getItem(k); } catch { return null; } };
+const sessionSet = (k, v) => { try { v === null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v); } catch {} };
+
+async function initTests() {
+  try {
+    const h = await api("/api/health");
+    $("t-url").replaceChildren(...h.allowed_hosts.map((host) => el("option", { value: `https://${host}/`, text: host })));
+    $("t-count").max = h.limits.max_count; $("t-conc").max = h.limits.max_concurrency;
+  } catch {}
+  $("t-start").onclick = startRun;
+  $("t-stop").onclick = async () => { if (run) { try { await api(`/api/tests/${run}/cancel`, { method: "POST" }); } catch (e) { show($("t-err"), "bad", e.message); } } };
+  const last = sessionGet("cs.run");
+  if (last) { try { await attach(last); } catch { sessionSet("cs.run", null); } }
+}
+function resetLive() {
+  seen = new Map(); cur = { failures: [] };
+  $("log").replaceChildren(); $("t-live").hidden = false; $("t-summary").hidden = true;
+  for (const id of ["c-pass", "c-fail", "c-err"]) $(id).textContent = "0";
+  $("c-prog").textContent = "0 / 0"; $("t-fill").style.width = "0"; $("t-bar").setAttribute("aria-valuenow", "0");
+}
+async function startRun() {
+  if (needCreds($("t-err"))) return;
+  show($("t-err"), "", "");
+  const body = { count: +$("t-count").value, split: $("t-split").value, seed: +$("t-seed").value, concurrency: +$("t-conc").value,
+    pipeline: $("t-pipe").value, viewport: $("t-view").value.trim(), dpr: +$("t-dpr").value, model: $("t-model").value, url: $("t-url").value };
+  prefs.set("model", body.model);
+  $("t-start").disabled = true; $("t-status").textContent = "Starting…";
+  try {
+    const r = await api("/api/tests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    sessionSet("cs.run", r.id); resetLive(); await attach(r.id);
+  } catch (e) {
+    $("t-status").textContent = ""; $("t-start").disabled = false; show($("t-err"), "bad", e.message);
+    if (e.status === 401) location.hash = "#settings";
+  }
+}
+async function attach(id) {
+  const st = await api(`/api/tests/${id}`);
+  run = id; resetLive(); st.records.forEach((r) => addRecord(r, st.total || st.records.length));
+  if (st.status !== "running") { finish(st); return; }
+  $("t-start").disabled = true; $("t-stop").disabled = false; $("t-status").textContent = "Running…";
+  if (es) es.close();
+  startWatch(id);
+  es = new EventSource(`/api/tests/${id}/events`);
+  es.addEventListener("record", (e) => { const d = JSON.parse(e.data); addRecord(d.record, d.n); });
+  es.addEventListener("note", (e) => {
+    const msg = JSON.parse(e.data).message; $("t-status").textContent = msg;
+    const log = $("log"); log.append(el("div", {}, el("span", { text: "⚠️" }), el("span", { class: "warn", text: msg }))); log.scrollTop = log.scrollHeight;
+  });
+  es.addEventListener("error", (e) => { if (e.data) show($("t-err"), "bad", JSON.parse(e.data).message); });
+  es.addEventListener("end", async () => {
+    es.close(); es = null;
+    try { finish(await api(`/api/tests/${id}`)); } catch { lost(); }   // gone by the time we ask: say so, don't throw
+  });
+}
+function addRecord(rec, total) {
+  if (seen.has(rec.index)) return;
+  seen.set(rec.index, rec);
+  const recs = [...seen.values()];
+  $("c-pass").textContent = recs.filter((r) => r.passed).length;
+  $("c-fail").textContent = recs.filter((r) => !r.passed && !r.error).length;
+  $("c-err").textContent = recs.filter((r) => r.error).length;
+  $("c-prog").textContent = `${recs.length} / ${total}`;
+  const pct = total ? Math.round(100 * recs.length / total) : 0;
+  $("t-fill").style.width = pct + "%"; $("t-bar").setAttribute("aria-valuenow", String(pct));
+  const icon = rec.error ? "💥" : rec.passed ? "✅" : "❌";
+  const line = el("div", {}, el("span", { text: icon }), el("strong", { text: rec.label }), el("span", { class: "muted", text: rec.subject || "" }));
+  if (rec.error) line.append(el("span", { class: "warn", text: rec.error }));
+  else if (!rec.passed) {
+    line.append(el("span", { class: "bad", text: "↳ " + rec.cause }));
+    if (Object.keys(rec.images || {}).length) line.append(el("button", { class: "link", text: "view", onclick: () => openViewer(rec) }));
+  }
+  const log = $("log"), stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
+  log.append(line); if (stick) log.scrollTop = log.scrollHeight;
+}
+/* Safety net: the stream can stall or the solver can restart (which wipes its in-memory runs). Poll the
+   run's state; it also catches any result the stream missed, and tells us when the run is gone. */
+let watch = null;
+function stopWatch() { if (watch) { clearInterval(watch); watch = null; } }
+function startWatch(id) {
+  stopWatch(); let misses = 0;
+  watch = setInterval(async () => {
+    if (run !== id) return stopWatch();
+    try {
+      const st = await api(`/api/tests/${id}`); misses = 0;
+      st.records.forEach((r) => addRecord(r, st.total || st.records.length));
+      if (st.status !== "running") { if (es) { es.close(); es = null; } finish(st); }
+    } catch (e) {
+      if (e.status === 404) lost();                                   // the run no longer exists
+      else if (++misses >= 6) lost("Lost contact with the solver. Start a new run when it is back.");
+      else $("t-status").textContent = "Reconnecting…";
+    }
+  }, 8000);
+}
+function lost(message) {
+  stopWatch(); if (es) { es.close(); es = null; }
+  $("t-start").disabled = false; $("t-stop").disabled = true; $("t-status").textContent = "";
+  sessionSet("cs.run", null);
+  show($("t-err"), "bad", message || "This run is gone: the solver restarted (or the run expired). Results are not saved, so start a new run. The log above shows what finished before that.");
+}
+function finish(st) {
+  stopWatch();
+  $("t-start").disabled = false; $("t-stop").disabled = true;
+  $("t-status").textContent = { done: "Finished.", cancelled: "Stopped. Partial results below.", error: "Stopped by an error." }[st.status] || "";
+  if (st.error) show($("t-err"), "bad", st.error);
+  const recs = st.records.slice().sort((a, b) => a.index - b.index);
+  const s = st.summary || {}, ok = recs.filter((r) => r.passed).length, bad = recs.filter((r) => !r.passed && !r.error), err = recs.filter((r) => r.error);
+  const sum = $("t-summary"); sum.hidden = false;
+  const stat = (n, label, cls) => el("div", {}, el("b", { class: cls || "", text: String(n) }), el("span", { class: "muted small", text: label }));
+  $("t-headline").replaceChildren(stat(`${ok}/${recs.length}`, `passed (${recs.length ? (100 * ok / recs.length).toFixed(1) : 0}%)`, "ok"),
+    stat(bad.length, "failed", bad.length ? "bad" : ""), stat(err.length, "errors", err.length ? "warn" : ""),
+    stat(s.mean_seconds ?? "–", "s per challenge"));
+  const read = recs.filter((r) => !r.error && r.target), misread = read.filter((r) => r.target !== r.subject).length;
+  const clicks = recs.filter((r) => r.clicked_ok !== null && r.clicked_ok !== undefined), off = clicks.filter((r) => !r.clicked_ok).length;
+  $("t-metrics").textContent = [read.length ? `Banner read correctly: ${read.length - misread}/${read.length} (${misread} misread).` : "",
+    clicks.length ? `Clicks on target: ${clicks.length - off}/${clicks.length} (${off} off-target).` : ""].filter(Boolean).join("  ");
+  const by = {}; recs.filter((r) => !r.error).forEach((r) => { (by[r.subject] ||= []).push(r.passed); });
+  $("t-subjects").replaceChildren(...Object.entries(by).sort().map(([k, v]) => {
+    const p = v.filter(Boolean).length; return el("span", { class: `chip ${p === v.length ? "ok" : "bad"}`, text: `${p === v.length ? "✅" : "❌"} ${k} ${p}/${v.length}` });
+  }));
+  $("t-downloads").replaceChildren(el("a", { class: "pill", href: `/api/tests/${st.id}/report.json`, text: "⬇ report.json" }),
+    el("a", { class: "pill", href: `/api/tests/${st.id}/failed_runs.zip`, text: "⬇ failed_runs.zip" }));
+  const fails = recs.filter((r) => !r.passed); cur.failures = fails.filter((r) => Object.keys(r.images || {}).length);
+  $("t-fail-title").textContent = fails.length ? `Failures (${fails.length})` : "✅ No failures.";
+  const tbl = $("t-fails"); tbl.hidden = !fails.length; const tb = tbl.tBodies[0]; tb.replaceChildren();
+  fails.forEach((r) => tb.append(el("tr", {}, el("td", { text: r.label }), el("td", { text: r.subject || "?" }),
+    el("td", { text: r.error ? r.error : r.cause }),
+    el("td", {}, Object.keys(r.images || {}).length ? el("button", { class: "link", text: "view", onclick: () => openViewer(r) }) : "–"))));
+}
+
+/* failure viewer */
+function openViewer(rec) {
+  const list = cur.failures.length ? cur.failures : [rec]; let i = Math.max(0, list.findIndex((r) => r.index === rec.index));
+  const draw = () => {
+    const r = list[i], im = r.images || {};
+    $("v-title").textContent = `${r.label} (${r.subject || "?"})  ·  ${i + 1} of ${list.length}`;
+    $("v-cause").textContent = r.error || r.cause;
+    $("v-state").src = im.state || im.error || ""; $("v-plan").src = im.plan || ""; $("v-fig-plan").hidden = !im.plan;
+    $("v-fig-state").classList.remove("zoom"); $("v-fig-plan").classList.remove("zoom");
+    $("v-prev").disabled = i === 0; $("v-next").disabled = i === list.length - 1;
+  };
+  $("v-prev").onclick = () => { if (i > 0) { i--; draw(); } };
+  $("v-next").onclick = () => { if (i < list.length - 1) { i++; draw(); } };
+  $("v-close").onclick = () => $("viewer").close();
+  for (const f of ["state", "plan"]) $(`v-${f}`).onclick = () => $(`v-fig-${f}`).classList.toggle("zoom");
+  $("viewer").onkeydown = (e) => { if (e.key === "ArrowLeft") $("v-prev").click(); if (e.key === "ArrowRight") $("v-next").click(); };
+  draw(); if (!$("viewer").open) $("viewer").showModal();
+}
+
+/* ------------------------------------------------------------ API page + boot */
+function initApi() {
+  const o = location.origin;
+  $("api-curl").textContent =
+`curl -X POST "${o}/api/solve" \\
+  -H "CF-Access-Client-Id: $ACCESS_CLIENT_ID" \\
+  -H "CF-Access-Client-Secret: $ACCESS_CLIENT_SECRET" \\
+  -H "X-CF-Account-Id: $CF_ACCOUNT_ID" \\
+  -H "X-CF-Api-Token: $CF_API_TOKEN" \\
+  -F image=@screenshot.png`;
+}
+(async function boot() {
+  updatePill(); initSettings(); initSolve(); initApi();
+  try { MODELS = await api("/api/models"); } catch { MODELS = []; }
+  const saved = prefs.get("model", "");
+  fillModels($("s-model"), saved); fillModels($("t-model"), saved);
+  route(); await initTests();
+})();
+</script>
+</body>
+</html>

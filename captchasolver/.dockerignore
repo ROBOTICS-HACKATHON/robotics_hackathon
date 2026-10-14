@@ -1,0 +1,10 @@
+.venv
+.git
+__pycache__
+*.egg-info
+.pytest_cache
+examples
+tests
+cloudflare
+bench.json
+report*.json

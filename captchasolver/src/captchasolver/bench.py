@@ -18,14 +18,44 @@ import random
 import sys
 import time
 from collections import defaultdict
+from contextlib import AsyncExitStack
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from playwright.async_api import Page, TimeoutError as PWTimeout, async_playwright
 
+from . import diag
 from .client import VLM_MODEL, WorkersAI, describe_exc
 from .screen import annotate, solve_screenshot
-from .web import CHALLENGE, DEFAULT_URL, _open_image_challenge, solve_image_challenge
+from .web import (ACCEPTED, CHALLENGE, DEFAULT_URL, REJECTED, SiteDidNotAnswer, _open_image_challenge, _outcome,
+                  solve_image_challenge)
+
+# Chromium in a container: /dev/shm is tiny there, so keep its shared memory on disk instead (harmless elsewhere).
+CHROMIUM_ARGS = ["--disable-dev-shm-usage"]
+CHALLENGE_TIMEOUT_S = 240     # one challenge: open, screenshot, solve (10 model calls), click, wait for the answer
+MAX_ATTEMPTS = 3              # a challenge whose browser died is retried on a fresh browser
+MAX_BROWSER_RESTARTS = 4      # more than this in one run and Chromium is plainly not viable here: stop, say why
+
+
+class BrowserKeepsCrashing(RuntimeError):
+    """Chromium died again and again. Grinding through the remaining challenges would only waste time."""
+
+
+def browser_died(e: BaseException) -> bool:
+    """The browser/page went away under us (crash, OOM kill, restart), as opposed to a normal failure."""
+    text = f"{type(e).__name__} {e}"
+    return "TargetClosedError" in text or "has been closed" in text or "Target crashed" in text
+
+
+async def _close(thing, timeout: float = 10.0) -> None:
+    """Close a context/browser without ever letting a dead or hung one block the run."""
+    if thing is None:
+        return
+    try:
+        await asyncio.wait_for(thing.close(), timeout)
+    except Exception:  # noqa: BLE001 - cleanup only
+        pass
+
 
 PRESSED_JS = ("els => els.map((e, i) => e.getAttribute('aria-pressed') === 'true' ? i : -1)"
               ".filter(i => i >= 0)")
@@ -178,22 +208,6 @@ async def _pressed(page: Page) -> list[int]:
     return await page.eval_on_selector_all(f"{CHALLENGE} .image-tile", PRESSED_JS)
 
 
-async def _outcome(page: Page, timeout_ms: int = 5000) -> bool:
-    """After Verify: True on redirect to /verified/, False on the error state."""
-    ok = asyncio.ensure_future(page.wait_for_url("**/verified/**", timeout=timeout_ms))
-    bad = asyncio.ensure_future(page.wait_for_selector(
-        f'{CHALLENGE}[data-state="error"]', timeout=timeout_ms))
-    done, pending = await asyncio.wait({ok, bad}, return_when=asyncio.FIRST_COMPLETED)
-    for t in pending:
-        t.cancel()
-    first = next(iter(done))
-    try:
-        first.result()
-    except PWTimeout:
-        return False
-    return first is ok
-
-
 async def _record_outcome(page: Page, rec: Record, fail_dir: Path | None, plan=None) -> None:
     """On a FAIL save two images in failed_runs/: the page as it looked after the failed Verify
     (NNN-label.png: tiles selected, the site's error message) and, when we have it, the solver's
@@ -301,15 +315,40 @@ async def run_tests(url: str, *, count: int = 100, split: str = "all", seed: int
                     viewport: tuple[int, int] = (1914, 1080), dpr: float = 1.0,
                     mode: str = "ask", model: str = VLM_MODEL, headless: bool = True,
                     fail_dir: str | None = None, out_dir: str | None = None,
-                    fail_images: bool = True, progress=None,
-                    note=print) -> tuple[list[Record], dict]:
+                    fail_images: bool = True, progress=None, note=print,
+                    ai: WorkersAI | None = None) -> tuple[list[Record], dict]:
+    """Run the demo-site challenges. Pass `ai` to use caller-supplied credentials (the web
+    server does); otherwise a client is built from the environment. Cancel-safe: cancelling the
+    task closes the browser and any client created here."""
     odir = Path(out_dir) if out_dir else default_examples_dir()
     # failed runs always land in <examples>/failed_runs unless told otherwise
     fdir = (Path(fail_dir) if fail_dir else odir / "failed_runs") if fail_images else None
     if pipeline == "files":
         odir.mkdir(parents=True, exist_ok=True)
-    async with WorkersAI() as ai, async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=headless)
+    async with AsyncExitStack() as stack:
+        if ai is None:
+            ai = await stack.enter_async_context(WorkersAI())
+        pw = await stack.enter_async_context(async_playwright())
+        lock, current, restarts = asyncio.Lock(), {"browser": None}, [0]
+
+        async def get_browser():
+            """The shared browser, relaunched if it died (crash, OOM kill, container hiccup)."""
+            async with lock:
+                b = current["browser"]
+                if b is None or not b.is_connected():
+                    if b is not None:
+                        restarts[0] += 1
+                        if restarts[0] > MAX_BROWSER_RESTARTS:
+                            if restarts[0] == MAX_BROWSER_RESTARTS + 1:
+                                note("Chromium keeps crashing, so the run is stopping early.")
+                            raise BrowserKeepsCrashing(
+                                "Chromium keeps crashing here: open /api/diagnostics?stress=1 to see why, or lower "
+                                f"'Parallel pages'. (It crashed {restarts[0] - 1} times; {diag.hints()}.)")
+                        note(f"Chromium closed unexpectedly: restarting it ({diag.hints()}).")
+                    b = current["browser"] = await pw.chromium.launch(headless=headless, args=CHROMIUM_ARGS, timeout=20000)
+                return b
+
+        browser = await get_browser()
         page = await browser.new_page()
         await page.goto(url)
         raw = await page.eval_on_selector_all(
@@ -323,41 +362,49 @@ async def run_tests(url: str, *, count: int = 100, split: str = "all", seed: int
                  f"(asked for {count})")
         sem, records, counter = asyncio.Semaphore(concurrency), [], [0]
 
+        async def challenge(page, rec: Record, index: int) -> None:
+            await _open_image_challenge(page, url, index)
+            rec.subject = (await page.locator(f"{CHALLENGE} .image-subject").inner_text()).strip()
+            if pipeline == "screenshot":
+                await _run_screenshot(page, ai, rec, viewport=viewport, mode=mode, model=model, fail_dir=fdir)
+            elif pipeline == "files":
+                await _run_files(page, ai, rec, url=url, out_dir=odir, mode=mode, model=model, fail_dir=fdir)
+            else:
+                await _run_dom(page, ai, rec, mode=mode, fail_dir=fdir)
+
         async def one(index: int, label: str) -> None:
-            rec = Record(index, label, split_of(label))
-            page = None
             async with sem:
                 t0 = time.perf_counter()
-                ctx = await browser.new_context(viewport={"width": viewport[0], "height": viewport[1]},
-                                                device_scale_factor=dpr)
-                try:
-                    page = await ctx.new_page()
-                    await _open_image_challenge(page, url, index)
-                    rec.subject = (await page.locator(f"{CHALLENGE} .image-subject").inner_text()).strip()
-                    if pipeline == "screenshot":
-                        await _run_screenshot(page, ai, rec, viewport=viewport, mode=mode,
-                                              model=model, fail_dir=fdir)
-                    elif pipeline == "files":
-                        await _run_files(page, ai, rec, url=url, out_dir=odir, mode=mode, model=model,
-                                         fail_dir=fdir)
-                    else:
-                        await _run_dom(page, ai, rec, mode=mode, fail_dir=fdir)
-                except Exception as e:  # keep the run going; the error is part of the result
-                    rec.error = describe_exc(e)
-                    await _save_error_state(page, rec, fdir)
-                finally:
-                    rec.seconds = round(time.perf_counter() - t0, 2)
+                for attempt in range(1, MAX_ATTEMPTS + 1):
+                    rec = Record(index, label, split_of(label))     # a retry starts from a clean record
+                    ctx = page = None
                     try:
-                        await ctx.close()
-                    except Exception:  # noqa: BLE001 - cleanup only; the record is already final
-                        pass
+                        ctx = await (await get_browser()).new_context(
+                            viewport={"width": viewport[0], "height": viewport[1]}, device_scale_factor=dpr)
+                        page = await ctx.new_page()
+                        await asyncio.wait_for(challenge(page, rec, index), CHALLENGE_TIMEOUT_S)
+                        break
+                    except asyncio.TimeoutError:                    # nothing may hang a whole run
+                        rec.error = f"TimeoutError: the challenge did not finish within {CHALLENGE_TIMEOUT_S} s"
+                        await _save_error_state(page, rec, fdir)
+                        break
+                    except Exception as e:  # keep the run going; the error is part of the result
+                        if browser_died(e) and attempt < MAX_ATTEMPTS:
+                            note(f"Chromium died during {label}; trying it again ({attempt}/{MAX_ATTEMPTS - 1}).")
+                            continue
+                        rec.error = describe_exc(e, 400)
+                        await _save_error_state(page, rec, fdir)
+                        break
+                    finally:
+                        await _close(ctx)
+                rec.seconds = round(time.perf_counter() - t0, 2)
             counter[0] += 1
             if progress:
                 progress(rec, counter[0], len(chosen))
             records.append(rec)
 
         await asyncio.gather(*[one(i, lbl) for i, lbl in chosen])
-        await browser.close()
+        await _close(current["browser"])
     records.sort(key=lambda r: r.index)
     return records, summarize(records)
 
@@ -399,7 +446,7 @@ async def run_replay(directory: str, *, url: str | None = None, concurrency: int
                     rec.passed, rec.clicked_ok = await execute_actions(page, doc)
                     await _record_outcome(page, rec, fdir)
                 except Exception as e:
-                    rec.error = describe_exc(e)
+                    rec.error = describe_exc(e, 400)
                     await _save_error_state(page, rec, fdir)
                 finally:
                     rec.seconds = round(time.perf_counter() - t0, 2)

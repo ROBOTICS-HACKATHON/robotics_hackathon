@@ -55,11 +55,40 @@ async def _run(args: argparse.Namespace) -> None:
         print(json.dumps({"tiles": tiles, "click": [centers[i] for i in tiles]}))
 
 
+def locate_main() -> None:
+    """Offline check of the dialog finder on photos/screenshots. Needs no credentials and no model."""
+    import sys
+    from .screen import LayoutNotFound, annotate, locate
+    p = argparse.ArgumentParser(prog="captchasolver locate",
+                                description="Find the captcha dialog in photos (no model, no API calls).")
+    p.add_argument("images", nargs="+")
+    p.add_argument("--overlay-dir", help="write an annotated image per input here")
+    a = p.parse_args()
+    bad = 0
+    for path in a.images:
+        try:
+            img, lay, tilt = locate(Image.open(path).convert("RGB"))
+        except LayoutNotFound as e:
+            bad += 1
+            print(f"✗ {path}: {e.code}: {e}")
+            continue
+        print(f"✓ {path}: grid={list(lay.grid)} verify={list(lay.verify)} tilt={tilt}°")
+        if a.overlay_dir:
+            Path(a.overlay_dir).mkdir(parents=True, exist_ok=True)
+            annotate(img, lay, {"tiles": []}).save(Path(a.overlay_dir) / (Path(path).stem + ".locate.png"))
+    sys.exit(1 if bad else 0)
+
+
 def main() -> None:
     import sys
     # `captchasolver probe` / `captchasolver web ...` forward to the other entry points
-    if len(sys.argv) > 1 and sys.argv[1] in ("probe", "web", "test", "compare", "replay"):
+    if len(sys.argv) > 1 and sys.argv[1] in ("probe", "web", "test", "compare", "replay", "serve", "locate"):
         cmd = sys.argv.pop(1)
+        if cmd == "locate":
+            return locate_main()
+        if cmd == "serve":
+            from .server import main as serve_main
+            return serve_main()
         if cmd == "replay":
             from .bench import replay_main
             return replay_main()

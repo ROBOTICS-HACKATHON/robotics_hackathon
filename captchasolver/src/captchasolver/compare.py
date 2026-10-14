@@ -17,7 +17,8 @@ from dataclasses import asdict, dataclass
 from PIL import Image, ImageDraw, ImageFont
 
 from .bench import Record, _viewport, paint, run_tests, use_color
-from .client import MODEL_CONFIG, ModelConfig, WorkersAI, describe_exc, save_model_config, vlm_query
+from .client import (MODEL_CONFIG, ModelConfig, WorkersAI, WorkersAIError, describe_exc, explain_auth_failure,
+                     save_model_config, vlm_query)
 from .web import DEFAULT_URL
 
 # (model id, short note, $ per M input tokens from Cloudflare's docs; None = not confirmed)
@@ -47,6 +48,8 @@ class Preflight:
     seconds: float = 0.0
     variant: int | None = None
     error: str = ""
+    kind: str = ""       # auth | forbidden | licence | quota | other: why it failed, when we can tell
+    advice: str = ""     # plain-English next step
 
 
 def _probe_image() -> bytes:
@@ -67,7 +70,7 @@ def _correct(answer: str) -> bool:
 
 
 async def preflight_one(ai: WorkersAI, model: str) -> Preflight:
-    img, last = _probe_image(), ""
+    img, last, last_exc = _probe_image(), "", None
     t0 = time.perf_counter()
     for i, cfg in enumerate(VARIANTS):
         MODEL_CONFIG[model] = cfg
@@ -75,13 +78,16 @@ async def preflight_one(ai: WorkersAI, model: str) -> Preflight:
             ans = await vlm_query(ai, img, "What text is shown? Reply with only the text.",
                                   model=model, max_tokens=32)
         except Exception as e:  # noqa: BLE001 - any failure just means "try the next variant"
-            last = describe_exc(e, 200)
+            last, last_exc = describe_exc(e, 200), e
             continue
         if _correct(ans):
             return Preflight(model, True, ans.strip()[:60], round(time.perf_counter() - t0, 2), i)
         last = f"wrong answer {ans.strip()[:60]!r}"
     MODEL_CONFIG.pop(model, None)
-    return Preflight(model, False, seconds=round(time.perf_counter() - t0, 2), error=last)
+    kind = advice = ""
+    if isinstance(last_exc, WorkersAIError):         # say WHY (bad token? licence? used-up allowance?), not just "failed"
+        kind, advice = await explain_auth_failure(ai, last_exc)
+    return Preflight(model, False, seconds=round(time.perf_counter() - t0, 2), error=last, kind=kind, advice=advice)
 
 
 def analyse(results: dict[str, list[Record]]) -> dict:

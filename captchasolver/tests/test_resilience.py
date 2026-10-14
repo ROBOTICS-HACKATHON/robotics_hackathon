@@ -69,3 +69,38 @@ async def test_5xx_still_retried_and_4xx_not():
         await ai2.run("@cf/x/y", json={})
     assert len(seen) == 1
     await ai.aclose(); await ai2.aclose()
+
+
+# ---------------------------------------------------------------- telling credential problems apart
+def test_explain_error_separates_causes():
+    from captchasolver.client import WorkersAIError, explain_error
+    kind = lambda status, errors: explain_error(WorkersAIError("m", status, errors))[0]  # noqa: E731
+    assert kind(401, [{"code": 10000, "message": "Authentication error"}]) == "auth"
+    assert kind(403, [{"code": 5016, "message": "AiError: Model Agreement: ..."}]) == "licence"
+    assert kind(429, [{"code": 4006, "message": "you have used up your daily free allocation of 10,000 neurons"}]) == "quota"
+    assert kind(403, [{"code": 9109, "message": "Unauthorized to access requested resource"}]) == "forbidden"
+    assert kind(500, [{"code": 3000, "message": "boom"}]) == "other"
+    assert kind(None, []) == "other"                                   # an error without Cloudflare's details
+    # old-style errors that only carry text still land somewhere sensible
+    assert explain_error(WorkersAIError("m: 401 Authentication error"))[0] == "auth"
+
+
+async def test_token_status_reads_either_kind_of_token():
+    from captchasolver.client import token_status
+
+    def make(handler):
+        return WorkersAI("a" * 32, "t" * 40, transport=httpx.MockTransport(handler), backoff=0)
+    ok = lambda status: (lambda request: httpx.Response(200, json={"success": True, "result": {"status": status}}))  # noqa: E731
+    assert await token_status(make(ok("active"))) == "active"
+    assert await token_status(make(ok("expired"))) == "expired"
+
+    def account_token_only(request):                   # the user-token check fails, the account-token check works
+        if request.url.path.endswith("/user/tokens/verify"):
+            return httpx.Response(401, json={"success": False, "errors": [{"code": 1000}]})
+        return httpx.Response(200, json={"success": True, "result": {"status": "active"}})
+    assert await token_status(make(account_token_only)) == "active"
+    assert await token_status(make(lambda r: httpx.Response(401, json={"success": False}))) == "unknown"
+
+    def network_down(request):
+        raise httpx.ConnectError("", request=request)
+    assert await token_status(make(network_down)) == "unknown"          # never raises
