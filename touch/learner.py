@@ -24,10 +24,17 @@ EXP_FILE = HERE / "experience.json"
 PRESS_OPTIONS = [0.02, 0.04, 0.07, 0.1]
 
 
-def reward(err_px, touched, n_touches, force_stop, tol_px):
-    """Score of one attempt: 1 = perfect, 0 = at the tolerance edge, negative = bad."""
+NEAR_MM = 15.0  # a missed tap this close to the glass (camera-measured) still earns partial credit
+
+
+def reward(err_px, touched, n_touches, force_stop, tol_px, gap_mm=None):
+    """Score of one attempt: 1 = perfect, 0 = at the tolerance edge, negative = bad.
+    No touch: -1, or (with 2 cameras) up to -0.4 the closer the tip stopped above the glass,
+    so the press-depth choice learns from near misses too."""
     if not touched:
-        return -1.0
+        if gap_mm is None:
+            return -1.0
+        return float(-1.0 + 0.6 * max(0.0, 1.0 - max(gap_mm, 0.0) / NEAR_MM))
     r = 1.0 - err_px / tol_px
     if n_touches > 1:
         r -= 0.3  # bounced / dragged
@@ -298,7 +305,8 @@ def refine(tapper, server, model, exp, bandit, target, tol_px, max_tries, rng, l
                 if getattr(tapper, "vision", None) is not None and tapper.last_hover_obs:
                     tapper.vision.learn(tapper.last_hover_obs, (g["u"], g["v"]))
         else:
-            err_px, r = None, reward(0, False, 0, tapper.last_force_stop, tol_px)
+            err_px = None
+            r = reward(0, False, 0, tapper.last_force_stop, tol_px, getattr(tapper, "last_press_height", None))
         bandit.update(zone, arm, r)
         if learn:
             exp.data.setdefault("attempts", []).append(
@@ -308,9 +316,12 @@ def refine(tapper, server, model, exp, bandit, target, tol_px, max_tries, rng, l
         attempts.append({"try": k, "zone": zone, "press": press, "slow": slow, "err_px": err_px, "reward": r,
                          "touches": len(got), "force_stop": tapper.last_force_stop,
                          "vision_pred": lv.get("landing") if lv else None,
-                         "vision_height": lv.get("height") if lv else None})
+                         "vision_height": lv.get("height_mm", lv.get("height")) if lv else None,
+                         "press_height_mm": getattr(tapper, "last_press_height", None)})
         log(f"   try {k} (zone {zone}): press {press:<4} {'slow' if slow < 1 else 'norm'} "
-            + (f"miss {err_px:5.1f}px" if err_px is not None else "NO TOUCH  ")
+            + (f"miss {err_px:5.1f}px" if err_px is not None else
+               ("NO TOUCH  " if getattr(tapper, "last_press_height", None) is None else
+                f"NO TOUCH, tip {tapper.last_press_height:4.1f}mm above glass"))
             + f"  reward {r:+.2f}" + ("  [force stop]" if tapper.last_force_stop else "")
             + (("  [cam: " + ("tip not seen" if not lv or lv.get("landing") is None else
                 ("REJECTED (implausible)" if lv.get("rejected") else
@@ -325,8 +336,17 @@ def refine(tapper, server, model, exp, bandit, target, tol_px, max_tries, rng, l
             q = tapper.safety.step(q_used, gain * (J @ -miss), tapper.base_model.touch_pose(u, v))
             q[-1] = model.home[-1]
         else:
-            # no touch: go a little deeper next time along the approach direction (towards the screen)
-            q = tapper.safety.step(q_used, 0.015 * (q_used - model.home), tapper.base_model.touch_pose(u, v))
+            gap = getattr(tapper, "last_press_height", None)
+            hov_q = getattr(tapper, "last_hover_q", None)
+            hov_h = None if (lv or {}).get("inconsistent") else (lv or {}).get("height_mm")
+            if gap is not None and hov_q is not None and hov_h is not None and hov_h - gap > 3:
+                # cameras: the tip stopped `gap` mm short. Joints per mm from the hover->press move,
+                # then go that much deeper (+2 mm so it really touches). safety.step limits the step.
+                per_mm = (q_used - hov_q) / (hov_h - gap)
+                q = tapper.safety.step(q_used, per_mm * (gap + 2.0), tapper.base_model.touch_pose(u, v))
+            else:
+                # no camera height: go a little deeper next time along the approach direction
+                q = tapper.safety.step(q_used, 0.015 * (q_used - model.home), tapper.base_model.touch_pose(u, v))
     tapper.speed = base_speed
     exp.save()
     if getattr(tapper, "vision", None) is not None and tapper.vision.enabled:

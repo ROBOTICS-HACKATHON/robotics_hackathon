@@ -48,6 +48,10 @@ For each target it taps, sees where it landed, corrects its **joint pose** and r
 the arm's model of "which joint angles hit (u, v)" is refit from all of it, with nearby examples weighted most,
 so **first tries keep getting better**. Each attempt also gets a reward (accuracy, minus penalties for no
 touch, double touches or force stops) that tunes how deep it presses. The report shows the learning curve.
+With 2 cameras (`VISION=auto`), a tap that doesn't register is measured too: the cameras see how far above
+the glass the tip stopped. A near miss (say 2 mm short) scores much better than 15 mm short, so each zone's
+press-depth choice learns from it, and the next try goes deeper by exactly that gap (+2 mm) instead of a
+fixed small step. The log shows "NO TOUCH, tip 4.2mm above glass".
 After practice, `./lr tap` and the agent automatically use the learned model (`--no-learned` to compare).
 Don't retry on a real CAPTCHA (a second tap toggles the tile back): practise on the test page, then demo.
 

@@ -122,6 +122,7 @@ class Tapper:
         g = self.guard
         g.peak = 0.0
         self.last_hover_obs, self.last_vision = None, None
+        self.last_hover_q, self.last_press_height = None, None
         if self.vision is not None and self.vision.enabled:
             # most of your path, then hover just above the target, look, correct, then straight down
             k = int(0.75 * (len(down) - 1))
@@ -130,6 +131,7 @@ class Tapper:
                 touch, why = self._hover_check(u, v, touch)
             if not why:
                 hover = touch + (self.model.home - touch) * self.hover_frac
+                self.last_hover_q = hover
                 why = follow_path(self.robot, np.array([hover, touch]), 0.8 / self.speed, guard=g, guard_from=0.3)
             approach_dir = touch - (touch + (self.model.home - touch) * self.hover_frac)
             self.last_touch_q = touch
@@ -147,8 +149,19 @@ class Tapper:
                 self.last_settle_err, why = settle(self.robot, pressed, timeout=self.dwell + 0.8, guard=g)
         self.last_stop = why
         self.last_force_stop, self.last_peak_load = why == "force", g.peak
+        if why != "touch" and self.vision is not None and self.vision.enabled:
+            # no touch registered (yet): the cameras measure how far above the glass the tip stopped.
+            # Taken during the dwell we wait anyway, so it costs no time.
+            t0 = time.time()
+            est = self.vision.estimate(self.vision.observe())
+            if est.get("mode") == "3d" and not est.get("inconsistent") and est.get("height_mm") is not None:
+                self.last_press_height = float(est["height_mm"])
+            time.sleep(max(0.0, self.dwell - (time.time() - t0)))
+            why_wait = 0.0
+        else:
+            why_wait = 0.05 if why == "touch" else self.dwell
         # touched already: lift off almost right away (don't keep pressing); otherwise hold for dwell
-        time.sleep(0.05 if why == "touch" else self.dwell)
+        time.sleep(why_wait)
         # lift off from wherever the stylus actually is (never re-push to the taught pose)
         follow_path(self.robot, up, t_up / self.speed, start=read_joints(self.robot))
         self.at_home = True
@@ -313,7 +326,8 @@ if __name__ == "__main__":
                 r = {"target": [u, v], "command": list(t.last_command), "touches": got,
                      "settle_err_deg": t.last_settle_err, "force_stop": t.last_force_stop,
                      "peak_load_jump": t.last_peak_load, "stopped_by": t.last_stop,
-                     "vision": t.last_vision, "hover_obs": t.last_hover_obs}
+                     "vision": t.last_vision, "hover_obs": t.last_hover_obs,
+                     "press_height_mm": t.last_press_height}
                 if got and not a.no_learn and t.vision is not None and t.last_hover_obs:
                     t.vision.learn(t.last_hover_obs, (got[0]["u"], got[0]["v"]))
                 if got and not a.no_learn and t.last_touch_q is not None:
