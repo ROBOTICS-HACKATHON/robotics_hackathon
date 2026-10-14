@@ -35,6 +35,8 @@ piece size, and alignment tolerance. Positions and sizes are fractions of the im
 Drag and release the slider to verify; arrow keys work too.
 
 Use the challenge number to repeat a setup while recording robot demonstrations.
+Choose "Random" to pick a variant each time a challenge opens. "Start again"
+keeps Random selected; resetting an open puzzle keeps its current variant.
 The site supplies the tasks and answer labels; it does not record camera frames
 or robot actions. Those recordings are needed to train the robot policy.
 

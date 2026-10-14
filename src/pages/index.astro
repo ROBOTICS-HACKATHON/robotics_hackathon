@@ -13,7 +13,7 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
       <button class="choice" data-challenge="slider"><strong>GeeTest slider</strong><span>Slide the piece into the gap.</span><span aria-hidden="true">→</span></button>
       <button class="choice" data-challenge="turnstile"><strong>Cloudflare Turnstile</strong><span>Checkbox verification</span><span aria-hidden="true">→</span></button>
     </div>
-    <label class="challenge-option" for="challenge-number">Challenge<select id="challenge-number">{Array.from({ length: 10 }, (_, index) => <option value={index}>{index + 1}</option>)}</select></label>
+    <label class="challenge-option" for="challenge-number">Challenge<select id="challenge-number"><option value="random">Random</option>{Array.from({ length: 10 }, (_, index) => <option value={index}>{index + 1}</option>)}</select></label>
     <label class="fullscreen-option"><input type="checkbox" id="fullscreen" checked /> Open fullscreen</label>
     <label class="fullscreen-option"><input type="checkbox" id="high-contrast" /> High contrast</label>
     <label class="fullscreen-option"><input type="checkbox" id="training-overlay-toggle" /> Training overlay</label>
@@ -57,8 +57,9 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
     let complete = false;
     let challengeIndex = 0;
     if (challengeNumber) {
-      const savedIndex = Number(sessionStorage.getItem('captcha-challenge-index') ?? '0');
-      if (Number.isInteger(savedIndex) && savedIndex >= 0 && savedIndex < 10) challengeNumber.value = String(savedIndex);
+      const savedSelection = sessionStorage.getItem('captcha-challenge-selection') ?? 'random';
+      const savedIndex = Number(savedSelection);
+      if (savedSelection === 'random' || (Number.isInteger(savedIndex) && savedIndex >= 0 && savedIndex < 10)) challengeNumber.value = savedSelection;
     }
 
     function finish() {
@@ -79,7 +80,9 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
       document.querySelectorAll<HTMLButtonElement>('[data-challenge]').forEach((button) => {
         button.addEventListener('click', async () => {
           kind = button.dataset.challenge ?? 'image';
-          challengeIndex = Number(challengeNumber?.value ?? '0');
+          const selection = challengeNumber?.value ?? 'random';
+          challengeIndex = selection === 'random' ? Math.floor(Math.random() * 10) : Number(selection);
+          sessionStorage.setItem('captcha-challenge-selection', selection);
           sessionStorage.setItem('captcha-challenge-index', String(challengeIndex));
           checkbox.disabled = false;
           close.disabled = false;
