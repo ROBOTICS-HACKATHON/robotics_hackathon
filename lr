@@ -235,7 +235,7 @@ cmd_touch-calib() {
 cmd_practice() {
   # shellcheck disable=SC2046
   RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/practice.py $(ARM_ARGS) --delay "${DELAY:-5}" \
-    --cameras "$(VISION_CAMS)" --tip-color "${TIP_COLOR:-pink}" "$@"
+    --cameras "$(VISION_CAMS)" --tip-color "${TIP_COLOR:-pink}" --screen-mm "${SCREEN_WIDTH_MM:-300}" "$@"
 }
 
 cmd_heatmap() {
@@ -256,7 +256,7 @@ cmd_tap() {
   [ $# -ge 1 ] || die "usage: ./lr tap u v [u v ...] | --test | --home   (u, v from 0 to 1)"
   # shellcheck disable=SC2046
   RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/tap.py $(ARM_ARGS) --delay "${DELAY:-5}" \
-    --cameras "$(VISION_CAMS)" --tip-color "${TIP_COLOR:-pink}" "$@"
+    --cameras "$(VISION_CAMS)" --tip-color "${TIP_COLOR:-pink}" --screen-mm "${SCREEN_WIDTH_MM:-300}" "$@"
 }
 
 cmd_see() {
@@ -269,7 +269,15 @@ cmd_tip-test() {
   local cams="${1:-}"
   [ -z "$cams" ] && { cams="${CAMERA:-}"; [ -n "${CAMERA2:-}" ] && cams="${cams:+$cams,}$CAMERA2"; }
   run_hw python /repo/touch/tipvision.py --cameras "$cams" --color "${TIP_COLOR:-pink}" --out /work/outputs \
-    --delay "${DELAY:-5}"
+    --delay "${DELAY:-5}" --screen-mm "${SCREEN_WIDTH_MM:-300}"
+}
+
+cmd_tip-live() {
+  local cams="${CAMERA:-}"
+  [ -n "${CAMERA2:-}" ] && cams="${cams:+$cams,}$CAMERA2"
+  say "Open http://localhost:8766/ in your browser (Ctrl+C here to stop)"
+  RUN_EXTRA="-p 8766:8766" run_hw python /repo/touch/tipvision.py --cameras "$cams" --color "${TIP_COLOR:-pink}" \
+    --screen-mm "${SCREEN_WIDTH_MM:-300}" --live
 }
 
 cmd_cam-test() {
@@ -315,6 +323,7 @@ Touch screen
   see                       Camera -> straightened screenshot in outputs/screen.jpg
   cam-test [CAMERA]         Test a camera (USB or phone): resolution, speed, markers found
   tip-test [CAM1,CAM2]      Tip vision check: sticker found?, viewing angles, can the pair measure height?
+  tip-live                  Live browser view of both cameras + tip height in mm (no arm needed)
 
   shell                     Open a shell inside the container
 EOF
@@ -322,7 +331,7 @@ EOF
 
 c="${1:-help}"; shift || true
 case "$c" in
-  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice|cam-test|tip-test|heatmap)
+  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice|cam-test|tip-test|heatmap|tip-live)
     "cmd_$c" "$@" ;;
   *) cmd_help; exit 1 ;;
 esac

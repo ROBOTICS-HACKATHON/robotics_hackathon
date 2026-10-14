@@ -127,9 +127,64 @@ def view_geometry(quad, shape, aspect=1.5):
     return {"pos": cam.tolist(), "dir": (d / np.linalg.norm(d)).tolist(), "tilt_deg": tilt}
 
 
+# ---------- 3D geometry from the screen markers ----------
+SCREEN_ASPECT = 1.513   # width / height of the marker frame (your screen: 1961 x 1296 px)
+SCREEN_WIDTH_MM = 300.0  # only sets the unit of the height (mm); set SCREEN_WIDTH_MM in lr.conf if known
+
+
+def estimate_focal(quad, shape, aspect=SCREEN_ASPECT):
+    """Focal length (pixels) from how the screen rectangle appears (no camera calibration needed).
+    Uses the fact that the screen's two edge directions are perpendicular and correctly scaled."""
+    h_img, w_img = shape[:2]
+    obj = np.array([[0, 0], [1, 0], [1, 1 / aspect], [0, 1 / aspect]], np.float32)
+    H = cv2.getPerspectiveTransform(obj, (quad - [w_img / 2, h_img / 2]).astype(np.float32))
+    h1, h2 = H[:, 0], H[:, 1]
+    cands = []
+    if abs(h1[2] * h2[2]) > 1e-12:
+        cands.append(-(h1[0] * h2[0] + h1[1] * h2[1]) / (h1[2] * h2[2]))
+    if abs(h1[2] ** 2 - h2[2] ** 2) > 1e-12:
+        cands.append(-((h1[0] ** 2 + h1[1] ** 2) - (h2[0] ** 2 + h2[1] ** 2)) / (h1[2] ** 2 - h2[2] ** 2))
+    fs = [np.sqrt(c) for c in cands if c > 0 and 0.4 * w_img < np.sqrt(c) < 4 * w_img]
+    return float(np.median(fs)) if fs else None
+
+
+def camera_pose(quad, shape, f, aspect=SCREEN_ASPECT, width_mm=SCREEN_WIDTH_MM):
+    """Camera position + orientation in screen coordinates (mm): x right, y down, z into the screen."""
+    h_img, w_img = shape[:2]
+    K = np.array([[f, 0, w_img / 2], [0, f, h_img / 2], [0, 0, 1]], float)
+    W, Hs = width_mm, width_mm / aspect
+    obj = np.array([[0, 0, 0], [W, 0, 0], [W, Hs, 0], [0, Hs, 0]], float)
+    ok, rvec, tvec = cv2.solvePnP(obj, quad.astype(float), K, None, flags=cv2.SOLVEPNP_IPPE)
+    if not ok:
+        return None
+    R, _ = cv2.Rodrigues(rvec)
+    return {"K": K, "R": R, "C": (-R.T @ tvec).ravel()}
+
+
+def ray(pose, px):
+    d = pose["R"].T @ np.linalg.inv(pose["K"]) @ np.array([px[0], px[1], 1.0])
+    return pose["C"], d / np.linalg.norm(d)
+
+
+def triangulate(r1, r2):
+    """Closest point between two sight lines, and how far apart they pass (consistency, mm)."""
+    (c1, d1), (c2, d2) = r1, r2
+    w = c1 - c2
+    a, b, c, d, e = d1 @ d1, d1 @ d2, d2 @ d2, d1 @ w, d2 @ w
+    den = a * c - b * b
+    if abs(den) < 1e-9:
+        return None, None
+    s, t = (b * e - c * d) / den, (a * e - b * d) / den
+    p1, p2 = c1 + s * d1, c2 + t * d2
+    return (p1 + p2) / 2, float(np.linalg.norm(p1 - p2))
+
+
 class TipVision:
-    def __init__(self, cameras, color="pink", cid=None):
+    def __init__(self, cameras, color="pink", cid=None, aspect=SCREEN_ASPECT, width_mm=SCREEN_WIDTH_MM,
+                 max_gap_mm=12.0):
         self.color = color
+        self.aspect, self.width_mm, self.max_gap = aspect, width_mm, max_gap_mm
+        self.focal = {}  # camera index -> recent focal estimates (median is used)
         self.specs = parse_cameras(cameras) if isinstance(cameras, str) else list(cameras or [])
         self.cams = []
         ok_specs = []
@@ -168,20 +223,24 @@ class TipVision:
     def observe(self):
         """One look from every camera. List (per camera) of {'uv','px','area'} or None."""
         out = []
+        self.last_frames = []
         for cam in self.cams:
             try:
                 f = cam.frame()
                 quad, _ = cam.locate(f)
                 tip = find_tip(f, self.color, quad) if quad is not None else None
+                self.last_frames.append((f, quad, tip))
                 if tip is None:
                     out.append(None)
                     continue
                 (x, y), area = tip
                 H = cv2.getPerspectiveTransform(quad, UNIT)
                 uv = cv2.perspectiveTransform(np.array([[[x, y]]], np.float32), H)[0, 0]
-                out.append({"uv": [float(uv[0]), float(uv[1])], "px": [float(x), float(y)], "area": area})
+                out.append({"uv": [float(uv[0]), float(uv[1])], "px": [float(x), float(y)], "area": area,
+                            "quad": quad.tolist(), "shape": list(f.shape[:2])})
             except Exception as e:
                 print(f"(camera read failed: {e})")
+                self.last_frames.append((None, None, None))
                 out.append(None)
         return out
 
@@ -194,11 +253,52 @@ class TipVision:
         f = np.array([1.0, uv[0], uv[1]])
         return f @ m if m.ndim == 2 else m
 
+    def _pose(self, i, o):
+        quad = np.array(o["quad"], np.float32)
+        f = estimate_focal(quad, o["shape"], self.aspect)
+        hist = self.focal.setdefault(i, [])
+        if f:
+            hist.append(f)
+            del hist[:-30]
+        fm = float(np.median(hist)) if hist else max(o["shape"]) / (2 * np.tan(np.radians(32.5)))
+        return camera_pose(quad, o["shape"], fm, self.aspect, self.width_mm)
+
+    def tip3d(self, obs):
+        """3D tip from two cameras: (u, v) under the tip, height above the glass (mm), line gap (mm)."""
+        seen = [(i, o) for i, o in enumerate(obs) if o and o.get("quad")]
+        if len(seen) < 2:
+            return None
+        (a, oa), (b, ob) = seen[:2]
+        pa, pb = self._pose(a, oa), self._pose(b, ob)
+        if pa is None or pb is None:
+            return None
+        P, gap = triangulate(ray(pa, oa["px"]), ray(pb, ob["px"]))
+        if P is None:
+            return None
+        side = -1.0 if (pa["C"][2] + pb["C"][2]) < 0 else 1.0  # cameras are on the viewer side
+        W, H = self.width_mm, self.width_mm / self.aspect
+        return {"uv": (float(P[0] / W), float(P[1] / H)), "height_mm": float(side * P[2]), "gap_mm": gap,
+                "cam_dist_mm": [float(np.linalg.norm(pa["C"])), float(np.linalg.norm(pb["C"]))]}
+
     def estimate(self, obs):
-        """{'landing': (u,v) or None, 'height': relative or None, 'cams': n seen}."""
+        """{'landing': (u,v) or None, 'height': relative or None, 'cams': n seen}.
+        Two cameras: real 3D (height in mm). One camera: learned parallax."""
         seen = [(i, np.array(o["uv"])) for i, o in enumerate(obs) if o]
         res = {"landing": None, "height": None, "cams": len(seen)}
         if not seen:
+            return res
+        t3 = self.tip3d(obs) if len(seen) >= 2 else None
+        if t3 is not None:
+            res.update(height_mm=t3["height_mm"], gap_mm=t3["gap_mm"], tip_uv=t3["uv"], mode="3d")
+            if t3["gap_mm"] > self.max_gap:  # the two sight lines don't meet: one camera saw something else
+                res["inconsistent"] = True
+                return res
+            # landing = point under the tip + learned drift while coming down (stylus tilt) * height
+            land = np.array(t3["uv"])
+            if self.drift is not None:
+                land = land + self.drift[0] + self.drift[1] * t3["height_mm"]
+            res["landing"] = tuple(land)
+            res["height"] = t3["height_mm"]
             return res
         offs = {i: self._offset(i, p) for i, p in seen}
         if len(seen) == 2 and all(o is not None for o in offs.values()):
@@ -221,7 +321,11 @@ class TipVision:
         """A hover observation and where that tap really landed (from the page)."""
         if not obs or not any(obs):
             return
-        obs = [o if (o and -0.15 <= o["uv"][0] <= 1.15 and -0.15 <= o["uv"][1] <= 1.15) else None for o in obs]
+        t3 = self.tip3d(obs)
+        if t3 is not None and t3["gap_mm"] <= self.max_gap and -0.2 <= t3["uv"][0] <= 1.2 and -0.2 <= t3["uv"][1] <= 1.2:
+            pass  # a consistent 3D reading: keep it
+        else:
+            obs = [o if (o and -0.15 <= o["uv"][0] <= 1.15 and -0.15 <= o["uv"][1] <= 1.15) else None for o in obs]
         if not any(obs):  # the camera saw something far off the screen: not the tip (or useless angle)
             self.rejected = getattr(self, "rejected", 0) + 1
             return
@@ -250,6 +354,7 @@ class TipVision:
         return float(np.mean(errs)) if errs else None
 
     def _fit_offsets(self):
+        self._fit_drift()
         self.off = {}
         S = self.data["samples"]
         for i in range(max(self.n, 2)):
@@ -264,6 +369,24 @@ class TipVision:
                 self.off[i] = np.linalg.lstsq(F, D, rcond=None)[0]
             else:
                 self.off[i] = np.median(D, 0)
+
+    def _fit_drift(self):
+        """3D: how the touch point differs from the point under the hovering tip: bias + slope * height."""
+        self.drift = None
+        rows = []
+        for s in self.data["samples"]:
+            t3 = self.tip3d(s["obs"]) if len([o for o in s["obs"] if o]) >= 2 else None
+            if t3 is not None and t3["gap_mm"] <= self.max_gap:
+                rows.append((t3["height_mm"], np.array(s["landed"]) - t3["uv"]))
+        if len(rows) >= 2:
+            h = np.array([r[0] for r in rows])
+            D = np.array([r[1] for r in rows])
+            if len(rows) >= 4 and np.ptp(h) > 2:
+                A = np.c_[np.ones(len(h)), h]
+                c = np.linalg.lstsq(A, D, rcond=None)[0]
+                self.drift = (c[0], c[1])
+            else:
+                self.drift = (np.median(D, 0), np.zeros(2))
 
     def save(self):
         allm = json.loads(MODEL_FILE.read_text()) if MODEL_FILE.exists() else {}
@@ -321,10 +444,142 @@ def check_setup(vision, out=Path("outputs")):
         print(f"\nangle between the two cameras: ~{ang:.0f} deg -> {verdict}")
     obs = vision.observe()
     est = vision.estimate(obs)
-    print(f"\nnow: tip seen by {est['cams']} camera(s); landing estimate "
-          + (f"u={est['landing'][0]:.3f} v={est['landing'][1]:.3f}" if est["landing"] else "-")
-          + (f", height {est['height']:.2f} (1 = normal hover)" if est.get("height") is not None else ""))
+    print(f"\nnow: tip seen by {est['cams']} camera(s)")
+    if est.get("mode") == "3d":
+        print(f"  3D: tip is over u={est['tip_uv'][0]:.3f} v={est['tip_uv'][1]:.3f}, "
+              f"{est['height_mm']:.1f} mm above the glass  (sight lines meet within {est['gap_mm']:.1f} mm"
+              + (" -> INCONSISTENT: one camera sees something else)" if est.get("inconsistent") else ")"))
+        if vision.focal:
+            print("  estimated lens focal length per camera (px): "
+                  + ", ".join(f"{np.median(h):.0f}" for h in vision.focal.values()))
+        print("  (height is in mm if SCREEN_WIDTH_MM in lr.conf matches the marker-to-marker width of your screen)")
+    elif est["landing"]:
+        print(f"  landing estimate u={est['landing'][0]:.3f} v={est['landing'][1]:.3f} (1 camera: no height)")
     print(vision.describe())
+
+
+LIVE_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Tip live view</title>
+<style>
+ body{margin:0;font-family:system-ui,sans-serif;background:#111;color:#eee}
+ header{display:flex;gap:28px;align-items:baseline;padding:14px 20px;background:#1c1c1c;flex-wrap:wrap}
+ .big{font-size:44px;font-weight:700;font-variant-numeric:tabular-nums}
+ .lbl{font-size:13px;color:#aaa;display:block}
+ .ok{color:#5bd38a}.bad{color:#ff6b6b}.warn{color:#ffcc55}
+ main{display:flex;flex-wrap:wrap;gap:10px;padding:10px}
+ main div{flex:1 1 420px}
+ img{width:100%;border-radius:6px;background:#222}
+ #map{position:relative;aspect-ratio:1.513;background:#fff;border-radius:6px;max-width:420px}
+ #dot{position:absolute;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;background:#e2b300;display:none}
+</style></head><body>
+<header>
+ <div><span class="lbl">height above the glass</span><span id="h" class="big">-</span></div>
+ <div><span class="lbl">tip over the screen (u, v)</span><span id="uv" class="big">-</span></div>
+ <div><span class="lbl">cameras agree (sight lines meet within)</span><span id="gap" class="big">-</span></div>
+ <div><span class="lbl">status</span><span id="st" class="big">-</span></div>
+ <div><span class="lbl">camera placement (angle between cameras)</span><span id="pl" class="big">-</span>
+  <span id="tl" class="lbl"></span></div>
+</header>
+<main><div><img id="c0"></div><div><img id="c1"></div>
+<div><span class="lbl">where the tip is over the screen</span><div id="map"><div id="dot"></div></div></div></main>
+<script>
+async function tick(){
+  try{
+    const s = await (await fetch('/state',{cache:'no-store'})).json();
+    const H=document.getElementById('h'), U=document.getElementById('uv'), G=document.getElementById('gap'), S=document.getElementById('st');
+    if(s.height_mm!=null){ H.textContent = s.height_mm<2 ? 'touching' : s.height_mm.toFixed(1)+' mm';
+      H.className='big '+(s.height_mm<2?'ok':''); } else H.textContent='-';
+    if(s.uv){ U.textContent=s.uv[0].toFixed(3)+', '+s.uv[1].toFixed(3);
+      const d=document.getElementById('dot'); d.style.display='block'; d.style.left=(s.uv[0]*100)+'%'; d.style.top=(s.uv[1]*100)+'%'; }
+    else { U.textContent='-'; document.getElementById('dot').style.display='none'; }
+    G.textContent = s.gap_mm!=null ? s.gap_mm.toFixed(1)+' mm' : '-';
+    G.className='big '+(s.gap_mm==null?'':(s.gap_mm<=12?'ok':'bad'));
+    S.textContent=s.status; S.className='big '+(s.status==='3D OK'?'ok':'warn');
+    const P=document.getElementById('pl');
+    if(s.pair_deg!=null){ P.textContent=s.pair_deg+'° '+s.placement; P.className='big '+(s.placement==='good'?'ok':'warn'); }
+    else P.textContent='-';
+    document.getElementById('tl').textContent = (s.cam_tilt||[]).map((t,i)=>'cam '+(i+1)+': '+(t==null?'no screen':t+'° from straight-on')).join('   ');
+    for(const i of [0,1]){ document.getElementById('c'+i).src='/cam'+i+'.jpg?t='+Date.now(); }
+  }catch(e){ document.getElementById('st').textContent='waiting...'; }
+  setTimeout(tick, 200);
+}
+tick();
+</script></body></html>"""
+
+
+def live(vision, port=8766):
+    """Live test without the arm: both camera feeds with the screen + tip drawn, and the 3D reading."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    shared = {"jpg": {}, "state": {"status": "starting"}}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _send(self, body, ctype):
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            p = self.path.split("?")[0]
+            if p == "/state":
+                return self._send(json.dumps(shared["state"]).encode(), "application/json")
+            if p.startswith("/cam") and p.endswith(".jpg"):
+                i = int(p[4:-4]) if p[4:-4].isdigit() else 0
+                blank = cv2.imencode(".jpg", np.full((240, 320, 3), 34, np.uint8))[1].tobytes()
+                return self._send(shared["jpg"].get(i, blank), "image/jpeg")
+            self._send(LIVE_PAGE.encode(), "text/html; charset=utf-8")
+
+    srv = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    print(f"Live view: open  http://localhost:{port}/  in your browser.  Ctrl+C to stop.")
+    try:
+        while True:
+            obs = vision.observe()
+            est = vision.estimate(obs)
+            for i, (f, quad, tip) in enumerate(vision.last_frames):
+                if f is None:
+                    continue
+                d = f.copy()
+                th = max(2, f.shape[1] // 400)
+                if quad is not None:
+                    cv2.polylines(d, [quad.astype(int)], True, (0, 255, 0), th)
+                if tip is not None:
+                    (x, y), _ = tip
+                    cv2.circle(d, (int(x), int(y)), max(10, f.shape[1] // 60), (255, 0, 255), th + 1)
+                msg = (f"cam {i + 1}: " + ("screen OK" if quad is not None else "NO SCREEN")
+                       + (", tip OK" if tip is not None else ", NO TIP"))
+                cv2.putText(d, msg, (12, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 4, cv2.LINE_AA)
+                cv2.putText(d, msg, (12, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+                shared["jpg"][i] = cv2.imencode(".jpg", d, [cv2.IMWRITE_JPEG_QUALITY, 80])[1].tobytes()
+            st = {"cams_seen": est["cams"], "uv": None, "height_mm": None, "gap_mm": None}
+            if est.get("mode") == "3d":
+                st.update(uv=list(est["tip_uv"]), height_mm=est["height_mm"], gap_mm=est["gap_mm"],
+                          status="cameras disagree" if est.get("inconsistent") else "3D OK")
+            elif est["landing"] is not None:
+                st.update(uv=list(est["landing"]), status="1 camera: no height")
+            else:
+                st["status"] = ("no camera sees the tip" if all(fr[1] is not None for fr in vision.last_frames)
+                                else "screen markers not visible")
+            # camera placement: each camera's angle to the screen + the angle between the two
+            geo = [view_geometry(q, f.shape, vision.aspect) if (f is not None and q is not None) else None
+                   for f, q, _ in vision.last_frames]
+            st["cam_tilt"] = [round(g["tilt_deg"]) if g else None for g in geo]
+            if len(geo) == 2 and all(geo):
+                ang = float(np.degrees(np.arccos(np.clip(np.dot(geo[0]["dir"], geo[1]["dir"]), -1, 1))))
+                st["pair_deg"] = round(ang)
+                st["placement"] = ("good" if ang >= 25 else "OK, height rough" if ang >= 12
+                                   else "too similar: move one camera")
+            shared["state"] = st
+            time.sleep(0.05)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        srv.shutdown()
 
 
 if __name__ == "__main__":
@@ -333,10 +588,16 @@ if __name__ == "__main__":
     p.add_argument("--color", default="pink", help="pink, green, orange, yellow, blue, or 'h1,s1,v1,h2,s2,v2'")
     p.add_argument("--out", default="outputs")
     p.add_argument("--delay", type=float, default=0, help="seconds to switch to the page before the check")
+    p.add_argument("--screen-mm", type=float, default=SCREEN_WIDTH_MM, help="marker-to-marker width of the screen")
+    p.add_argument("--live", action="store_true", help="live view in the browser (no arm needed)")
+    p.add_argument("--port", type=int, default=8766)
     a = p.parse_args()
     from common import countdown
     countdown(a.delay, "switch to the page with the corner markers (full-screen, F11)")
-    v = TipVision(a.cameras, a.color)
+    v = TipVision(a.cameras, a.color, width_mm=a.screen_mm)
     if not v.enabled:
         raise SystemExit("No camera configured (CAMERA / CAMERA2 in lr.conf).")
-    check_setup(v, Path(a.out))
+    if a.live:
+        live(v, a.port)
+    else:
+        check_setup(v, Path(a.out))

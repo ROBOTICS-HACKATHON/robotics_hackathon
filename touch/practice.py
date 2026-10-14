@@ -32,6 +32,7 @@ p.add_argument("--max-load", type=int, default=0, help="force guard (0 = off)")
 p.add_argument("--http-port", type=int, default=8765)
 p.add_argument("--cameras", default="", help="tip vision cameras: 'none', one, or two comma-separated")
 p.add_argument("--tip-color", default="pink")
+p.add_argument("--screen-mm", type=float, default=300.0, help="marker-to-marker screen width (for mm heights)")
 p.add_argument("--delay", type=float, default=5, help="seconds to switch to the page before starting")
 a = p.parse_args()
 
@@ -49,7 +50,7 @@ results = []
 vision = None
 if a.cameras:
     from tipvision import TipVision
-    vision = TipVision(a.cameras, a.tip_color, cid=calib_id(calib))
+    vision = TipVision(a.cameras, a.tip_color, width_mm=a.screen_mm, cid=calib_id(calib))
 with Tapper(a.port, a.id, a.robot, speed=a.speed, max_load=a.max_load, correct=False, learned=False,
             vision=vision) as t:
     if vision is not None:

@@ -87,6 +87,11 @@ Each camera's viewing-angle shift is learned from measured taps (`tap --test/--r
 doesn't care if the hover height varies. Simulated with a front-low + top pair: landing predicted to
 ~1-3 px (2 cams) vs ~3-7 px (top cam alone) vs ~18 px (front-low cam alone). `--no-vision` taps without it.
 
+**Live test without the arm:** `./lr tip-live`, then open `http://localhost:8766/` in your browser. Both camera
+feeds (screen outlined green, tip circled), plus live: height of the tip above the glass in mm, where it is over
+the screen, and whether the two cameras agree. Move the stylus by hand to test. Set `SCREEN_WIDTH_MM` (marker
+to marker) in `lr.conf` for real millimetres.
+
 ## Protecting the screen
 
 - **Stop on touch (tests and practice):** the page reports a touch the instant the glass registers it, and the

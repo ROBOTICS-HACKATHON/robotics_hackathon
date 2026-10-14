@@ -242,6 +242,7 @@ if __name__ == "__main__":
     p.add_argument("--dwell", type=float, default=0.25, help="seconds the stylus stays on the screen")
     p.add_argument("--cameras", default="", help="tip vision cameras: 'none', one, or two comma-separated")
     p.add_argument("--tip-color", default="pink")
+    p.add_argument("--screen-mm", type=float, default=300.0, help="marker-to-marker screen width (for mm heights)")
     p.add_argument("--no-vision", action="store_true", help="tap without the camera hover-check")
     p.add_argument("--no-learned", action="store_true", help="ignore the learned model (use calibration only)")
     p.add_argument("--no-correct", action="store_true", help="don't apply the learned aim correction")
@@ -277,7 +278,7 @@ if __name__ == "__main__":
     if a.cameras and not a.no_vision:
         from correction import calib_id as _cid
         from tipvision import TipVision
-        vision = TipVision(a.cameras, a.tip_color, cid=_cid(load_calib()))
+        vision = TipVision(a.cameras, a.tip_color, width_mm=a.screen_mm, cid=_cid(load_calib()))
     with Tapper(a.port, a.id, a.robot, a.lift, a.press, a.speed, via_home=not a.no_home,
                 smooth=a.smooth, own_path=not a.simple_path, correct=not a.no_correct,
                 dwell=a.dwell, max_load=a.max_load, torque=a.torque, learned=not a.no_learned,
