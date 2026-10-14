@@ -1,3 +1,5 @@
+import { readStorage, writeStorage } from './browser-state';
+
 type Detail = 'all' | 'markers' | 'coordinates' | 'distances';
 type Focus = 'all' | 'checkbox' | 'verify' | 'slider' | `tile-${number}`;
 type Target = { label: string; focus: Focus; element: HTMLElement; bounds: DOMRect };
@@ -14,11 +16,19 @@ function crosshair({ x, y }: Point, size = 7): string {
 }
 
 function stored(key: string): string | null {
-  try { return localStorage.getItem(key); } catch { return null; }
+  return readStorage('local', key).unwrapOr(null);
 }
 
 function persist(key: string, value: string): void {
-  try { localStorage.setItem(key, value); } catch { /* Settings still work without storage. */ }
+  writeStorage('local', key, value).match(() => {}, () => {
+    const message = 'Overlay settings could not be saved. Enable site storage to keep them after reloading.';
+    const status = document.querySelector('#fullscreen-status');
+    const browserStatus = document.querySelector('#browser-status');
+    if (status) status.textContent = message;
+    if (browserStatus) browserStatus.textContent = message;
+    const feedback = document.querySelector<HTMLElement>('#browser-feedback');
+    if (feedback) feedback.hidden = false;
+  });
 }
 
 function isDetail(value: string | null): value is Detail {

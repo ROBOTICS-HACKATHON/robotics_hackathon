@@ -8,6 +8,7 @@
     "preview": "bun --bun astro preview --host 0.0.0.0"
   },
   "dependencies": {
-    "astro": "latest"
+    "astro": "latest",
+    "neverthrow": "^8.2.0"
   }
 }

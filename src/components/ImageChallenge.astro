@@ -13,7 +13,7 @@ const imageChallenge = imageChallenges[0];
   <div class="image-grid" role="group" aria-labelledby="image-heading">
     {imageChallenge.tiles.map((tile, index) => (
       <button type="button" class="image-tile" data-tile-index={index} aria-pressed="false">
-        <img src={tile.src} alt={tile.alt} width="240" height="240" draggable="false" />
+        <img src={tile.src} alt={tile.alt} width="240" height="240" draggable="false" loading="lazy" decoding="async" />
         <span class="selection-mark" aria-hidden="true">✓</span>
         <span class="practice-tag">Click this tile</span>
       </button>

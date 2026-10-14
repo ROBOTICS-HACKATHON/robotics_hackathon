@@ -35,7 +35,7 @@ import { trainingCatalog } from '../data/training-catalog';
       <label for="training-ratio">Training %<input id="training-ratio" type="number" min="10" max="90" step="1" value="80" /></label>
       <p class="muted">Custom ratios split tasks; photos may overlap.</p>
       <label for="session-split">Split<select id="session-split"><option value="train">Train · {trainingCatalog.filter((entry) => entry.split === 'train').length}</option><option value="test">Test · {trainingCatalog.filter((entry) => entry.split === 'test').length}</option></select></label>
-      <label for="session-kind">Tasks<select id="session-kind"><option value="mixed">Mixed</option><option value="image">Image</option><option value="slider">Slider</option></select></label>
+      <label for="session-kind">Tasks<select id="session-kind"><option value="image">Image (default)</option><option value="slider">Slider (bonus)</option><option value="mixed">Mixed (optional)</option></select></label>
       <label for="session-count">Count<input id="session-count" type="number" min="1" value="100" /></label>
       <p id="session-availability" class="muted" role="status"></p>
       <button id="start-session" class="button primary" type="button">Start session</button>
@@ -54,9 +54,12 @@ import { trainingCatalog } from '../data/training-catalog';
     <ImageChallenge />
     <SliderChallenge />
     <TrainingOverlay />
+    <div id="browser-feedback" hidden><p id="browser-status" role="alert"></p><button id="retry-completion" type="button" hidden>Retry saving completion</button></div>
     <div id="session-progress" hidden><span id="session-progress-label" role="status"></span><button id="stop-session" type="button">Stop session</button></div>
   </dialog>
   <script>
+    import { readStorage, writeStorage, removeStorage, requestFullscreen, exitFullscreen, openDialog, prepareImages, navigate } from '../lib/browser-state';
+    import type { StorageKind } from '../lib/browser-state';
     import { trainingCatalog, partitionTrainingCatalog } from '../data/training-catalog';
     type CatalogEntry = (typeof trainingCatalog)[number];
     type ChallengeKind = CatalogEntry['kind'] | 'turnstile';
@@ -89,12 +92,33 @@ import { trainingCatalog } from '../data/training-catalog';
     let generation = 0;
     let advanceTimer: number | undefined;
     let sessionCatalog: readonly CatalogEntry[] = trainingCatalog;
-    if (trainingRatio) trainingRatio.value = sessionStorage.getItem('captcha-training-ratio') ?? '80';
+    const feedback = document.querySelector<HTMLElement>('#browser-feedback');
+    const browserStatus = document.querySelector<HTMLElement>('#browser-status');
+    const retryCompletion = document.querySelector<HTMLButtonElement>('#retry-completion');
+    function report(message: string) {
+      if (fullscreenStatus) fullscreenStatus.textContent = message;
+      if (browserStatus) browserStatus.textContent = message;
+      if (feedback) feedback.hidden = false;
+    }
+    function readPreference(storage: StorageKind, key: string): string | null {
+      return readStorage(storage, key).match((value) => value, () => {
+        report('Browser storage is blocked. Settings work for this page; enable site storage to save completion.');
+        return null;
+      });
+    }
+    function savePreference(storage: StorageKind, key: string, value: string): void {
+      writeStorage(storage, key, value).match(() => {}, () => report('Settings could not be saved. Enable site storage to keep settings and save completion.'));
+    }
+    function removePreference(key: string): void {
+      removeStorage('session', key).match(() => {}, () => report('Browser storage is blocked. Enable site storage before completing a task.'));
+    }
+
+    if (trainingRatio) trainingRatio.value = readPreference('session', 'captcha-training-ratio') ?? '80';
 
     function availableEntries(): CatalogEntry[] {
       const mode = practiceMode?.value ?? 'full';
       if (mode === 'checkbox') return [];
-      const filter = mode === 'tile' ? 'image' : mode === 'slider' ? 'slider' : sessionKind?.value ?? 'mixed';
+      const filter = mode === 'tile' ? 'image' : mode === 'slider' ? 'slider' : sessionKind?.value ?? 'image';
       return sessionCatalog.filter((entry) => entry.split === (sessionSplit?.value ?? 'train') && (filter === 'mixed' || entry.kind === filter));
     }
 
@@ -102,7 +126,7 @@ import { trainingCatalog } from '../data/training-catalog';
       const enteredRatio = Number(trainingRatio?.value ?? '80');
       const ratio = Math.min(90, Math.max(10, Number.isFinite(enteredRatio) ? Math.round(enteredRatio) : 80));
       if (trainingRatio) trainingRatio.value = String(ratio);
-      sessionStorage.setItem('captcha-training-ratio', String(ratio));
+      savePreference('session', 'captcha-training-ratio', String(ratio));
       sessionCatalog = partitionTrainingCatalog(ratio);
       if (sessionSplit) {
         for (const option of sessionSplit.options) {
@@ -129,8 +153,8 @@ import { trainingCatalog } from '../data/training-catalog';
 
     function updatePractice() {
       const mode = practiceMode?.value ?? 'full';
-      sessionStorage.setItem('captcha-practice-mode', mode);
-      sessionStorage.setItem('captcha-practice-tile', practiceTile?.value ?? '0');
+      savePreference('session', 'captcha-practice-mode', mode);
+      savePreference('session', 'captcha-practice-tile', practiceTile?.value ?? '0');
       if (practiceTileOption) practiceTileOption.hidden = mode !== 'tile';
       const compatible = mode === 'tile' ? 'image' : mode === 'slider' ? 'slider' : 'turnstile';
       document.querySelectorAll<HTMLButtonElement>('[data-challenge]').forEach((button) => {
@@ -139,12 +163,12 @@ import { trainingCatalog } from '../data/training-catalog';
       updateSessionSettings();
     }
     if (practiceMode) {
-      const savedMode = sessionStorage.getItem('captcha-practice-mode') ?? 'full';
+      const savedMode = readPreference('session', 'captcha-practice-mode') ?? 'full';
       if (['full', 'tile', 'slider', 'checkbox'].includes(savedMode)) practiceMode.value = savedMode;
       practiceMode.addEventListener('change', updatePractice);
     }
     if (practiceTile) {
-      const savedTile = Number(sessionStorage.getItem('captcha-practice-tile') ?? '0');
+      const savedTile = Number(readPreference('session', 'captcha-practice-tile') ?? '0');
       if (Number.isInteger(savedTile) && savedTile >= 0 && savedTile < 9) practiceTile.value = String(savedTile);
       practiceTile.addEventListener('change', updatePractice);
     }
@@ -155,26 +179,27 @@ import { trainingCatalog } from '../data/training-catalog';
     trainingRatio?.addEventListener('change', updateSessionSettings);
     const contrast = document.querySelector<HTMLInputElement>('#high-contrast');
     if (contrast) {
-      contrast.checked = localStorage.getItem('captcha-contrast') === 'high';
+      contrast.checked = readPreference('local', 'captcha-contrast') === 'high';
       contrast.addEventListener('change', () => {
         const mode = contrast.checked ? 'high' : 'normal';
         document.documentElement.dataset.contrast = mode;
-        localStorage.setItem('captcha-contrast', mode);
+        savePreference('local', 'captcha-contrast', mode);
       });
     }
     if (challengeNumber) {
-      const savedSelection = sessionStorage.getItem('captcha-challenge-selection') ?? 'random';
+      const savedSelection = readPreference('session', 'captcha-challenge-selection') ?? 'random';
       if (savedSelection === 'random' || trainingCatalog.some((entry) => `${entry.kind}:${entry.index}` === savedSelection)) challengeNumber.value = savedSelection;
     }
 
     function cancelSession() {
-      sessionStorage.removeItem('captcha-session-total');
+      removePreference('captcha-session-total');
       generation += 1;
       if (advanceTimer !== undefined) window.clearTimeout(advanceTimer);
       advanceTimer = undefined;
       queue = [];
       queuePosition = 0;
       pending = false;
+      if (retryCompletion) retryCompletion.hidden = true;
       if (sessionProgress) sessionProgress.hidden = true;
     }
 
@@ -192,24 +217,27 @@ import { trainingCatalog } from '../data/training-catalog';
     async function launchChallenge(nextKind: ChallengeKind, index: number) {
       if (!dialog || !checkbox || !checkboxStep || !image || !close) return;
       const currentGeneration = ++generation;
+      if (feedback) feedback.hidden = true;
+      if (fullscreenStatus) fullscreenStatus.textContent = '';
       kind = nextKind;
       challengeIndex = index;
-      pending = false;
-      checkbox.disabled = false;
+      pending = true;
+      if (retryCompletion) retryCompletion.hidden = true;
+      checkbox.disabled = true;
       close.disabled = false;
       checkbox.removeAttribute('data-success');
       dialog.dataset.kind = kind;
       const practice = practiceMode?.value ?? 'full';
-      sessionStorage.setItem('captcha-practice-mode', practice);
-      sessionStorage.setItem('captcha-practice-tile', practiceTile?.value ?? '0');
-      sessionStorage.setItem('captcha-challenge-index', String(challengeIndex));
+      savePreference('session', 'captcha-practice-mode', practice);
+      savePreference('session', 'captcha-practice-tile', practiceTile?.value ?? '0');
+      savePreference('session', 'captcha-challenge-index', String(challengeIndex));
       const entry = queue.length > 0 ? queue[queuePosition] : trainingCatalog.find((item) => item.kind === kind && item.index === index);
       if (entry) {
-        sessionStorage.setItem('captcha-challenge-id', entry.id);
-        sessionStorage.setItem('captcha-challenge-split', entry.split);
+        savePreference('session', 'captcha-challenge-id', entry.id);
+        savePreference('session', 'captcha-challenge-split', entry.split);
       } else {
-        sessionStorage.removeItem('captcha-challenge-id');
-        sessionStorage.removeItem('captcha-challenge-split');
+        removePreference('captcha-challenge-id');
+        removePreference('captcha-challenge-split');
       }
       dialog.dataset.practice = practice;
       dialog.dataset.practiceTile = practiceTile?.value ?? '0';
@@ -223,16 +251,67 @@ import { trainingCatalog } from '../data/training-catalog';
       if (slider) slider.hidden = true;
       if (sessionProgress) sessionProgress.hidden = queue.length === 0;
       if (sessionProgressLabel && queue.length > 0 && entry) sessionProgressLabel.textContent = `${queuePosition + 1}/${queue.length} · ${entry.split === 'train' ? 'Train' : 'Test'} · ${entry.id}`;
+      if (kind !== 'turnstile') {
+        if (checkboxLabel) checkboxLabel.textContent = 'Loading images…';
+        if (fullscreenStatus) fullscreenStatus.textContent = 'Loading challenge images…';
+        const section = kind === 'image' ? image : slider;
+        const images = Array.from(section?.querySelectorAll<HTMLImageElement>('img') ?? []);
+        const loaded = await prepareImages(images);
+        if (currentGeneration !== generation) return;
+        if (loaded.isErr()) {
+          report('Challenge images could not load. Check the connection, close this challenge, and try again.');
+          cancelSession();
+          return;
+        }
+        if (fullscreenStatus) fullscreenStatus.textContent = '';
+        if (checkboxLabel) checkboxLabel.textContent = kind === 'image' ? "I'm not a robot" : 'Verify you are human';
+      }
       if (fullscreen?.checked && !document.fullscreenElement) {
-        await document.documentElement.requestFullscreen().catch(() => {
-          if (fullscreenStatus) fullscreenStatus.textContent = 'Fullscreen is unavailable. The challenge still works in this window.';
-        });
+        const result = await requestFullscreen();
+        if (result.isErr()) report('Fullscreen is unavailable. The challenge still works in this window.');
       }
       if (currentGeneration !== generation) return;
-      if (!dialog.open) dialog.showModal();
+      pending = false;
+      checkbox.disabled = false;
+      if (!dialog.open) {
+        const opened = openDialog(dialog);
+        if (opened.isErr()) { report('The challenge could not open. Close other dialogs and try again.'); cancelSession(); return; }
+      }
       if (practice === 'tile' || practice === 'slider') showChallenge();
       else checkbox.focus();
     }
+
+    function saveCompletion() {
+      const total = queue.length;
+      const entry = total > 0 ? queue[queuePosition]
+        : trainingCatalog.find((item) => item.kind === kind && item.index === challengeIndex);
+      const saved = writeStorage('session', 'captcha-challenge-index', String(challengeIndex))
+        .andThen(() => entry ? writeStorage('session', 'captcha-challenge-id', entry.id)
+          : removeStorage('session', 'captcha-challenge-id'))
+        .andThen(() => entry ? writeStorage('session', 'captcha-challenge-split', entry.split)
+          : removeStorage('session', 'captcha-challenge-split'))
+        .andThen(() => writeStorage('session', 'captcha-practice-mode', practiceMode?.value ?? 'full'))
+        .andThen(() => writeStorage('session', 'captcha-practice-tile', practiceTile?.value ?? '0'))
+        .andThen(() => total > 0
+          ? writeStorage('session', 'captcha-session-total', String(total))
+          : removeStorage('session', 'captcha-session-total'))
+        .andThen(() => writeStorage('session', 'captcha-solved', kind));
+      if (saved.isErr()) {
+        pending = true;
+        if (close) close.disabled = false;
+        report('Task complete, but the browser could not save it. Enable storage for this site, then retry saving completion.');
+        if (retryCompletion) retryCompletion.hidden = false;
+        return;
+      }
+      const navigation = navigate('/verified/');
+      if (navigation.isErr()) {
+        report('Completion saved, but the result page could not open. Use Retry saving completion.');
+        if (retryCompletion) retryCompletion.hidden = false;
+        return;
+      }
+      complete = true;
+    }
+    retryCompletion?.addEventListener('click', saveCompletion);
 
     function finish() {
       if (complete || pending || !dialog?.open) return;
@@ -241,27 +320,21 @@ import { trainingCatalog } from '../data/training-catalog';
         const currentGeneration = generation;
         advanceTimer = window.setTimeout(() => {
           if (currentGeneration !== generation) return;
-          pending = false;
-          queuePosition += 1;
-          const next = queue[queuePosition];
+          const next = queue[queuePosition + 1];
           if (next) {
+            queuePosition += 1;
             void launchChallenge(next.kind, next.index);
             return;
           }
-          complete = true;
-          sessionStorage.setItem('captcha-session-total', String(queue.length));
-          sessionStorage.setItem('captcha-solved', kind);
-          window.location.assign('/verified/');
+          saveCompletion();
         }, 300);
         return;
       }
-      complete = true;
-      sessionStorage.setItem('captcha-solved', kind);
-      window.location.assign('/verified/');
+      saveCompletion();
     }
 
     function checkCompleted() {
-      if (sessionStorage.getItem('captcha-solved')) window.location.replace('/verified/');
+      if (readPreference('session', 'captcha-solved')) navigate('/verified/', true).match(() => {}, () => report('Could not open the saved result. Reload this page to retry.'));
     }
     checkCompleted();
     window.addEventListener('pageshow', checkCompleted);
@@ -271,9 +344,9 @@ import { trainingCatalog } from '../data/training-catalog';
         const nextKind = button.dataset.challenge;
         if (nextKind !== 'image' && nextKind !== 'slider' && nextKind !== 'turnstile') return;
         cancelSession();
-        sessionStorage.removeItem('captcha-session-total');
+        removePreference('captcha-session-total');
         const selection = challengeNumber?.value ?? 'random';
-        sessionStorage.setItem('captcha-challenge-selection', selection);
+        savePreference('session', 'captcha-challenge-selection', selection);
         const entries = trainingCatalog.filter((entry) => entry.kind === nextKind);
         const selected = entries.find((entry) => `${entry.kind}:${entry.index}` === selection);
         const entry = selected ?? entries[Math.floor(Math.random() * entries.length)];
@@ -286,7 +359,7 @@ import { trainingCatalog } from '../data/training-catalog';
       const entries = availableEntries();
       if (entries.length === 0) return;
       cancelSession();
-      sessionStorage.removeItem('captcha-session-total');
+      removePreference('captcha-session-total');
       // Fisher–Yates keeps every catalog entry equally likely without repeats.
       for (let index = entries.length - 1; index > 0; index -= 1) {
         const swapIndex = Math.floor(Math.random() * (index + 1));
@@ -304,6 +377,7 @@ import { trainingCatalog } from '../data/training-catalog';
     });
 
     checkbox?.addEventListener('click', () => {
+      if (pending) return;
       if (kind === 'turnstile' && checkbox && close) {
         checkbox.disabled = true;
         close.disabled = true;
@@ -326,7 +400,9 @@ import { trainingCatalog } from '../data/training-catalog';
     });
     dialog?.addEventListener('close', () => {
       cancelSession();
-      if (document.fullscreenElement) void document.exitFullscreen();
+      if (document.fullscreenElement) {
+        void exitFullscreen().match(() => {}, () => report('Could not leave fullscreen. Press Escape or use the browser fullscreen control.'));
+      }
     });
     document.addEventListener('challenge-state', (event) => {
       if (!(event instanceof CustomEvent)) return;
@@ -346,6 +422,9 @@ import { trainingCatalog } from '../data/training-catalog';
     .session-panel select, .session-panel input { width: 140px; min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 3px; font: inherit; background: #fff; color: var(--text); }
     .session-panel .button { width: 100%; margin-top: 8px; }
     .session-panel .button:disabled { opacity: .45; cursor: default; }
+    #browser-feedback { position: fixed; top: 24px; left: 24px; right: 24px; max-width: 560px; margin: auto; padding: 12px; background: #fff; color: #8b1e1e; border: 1px solid #8b1e1e; font-size: 13px; }
+    #browser-status { margin: 0; }
+    #retry-completion { margin-top: 8px; padding: 6px 10px; background: #fff; color: #111; border: 1px solid #aaa; border-radius: 3px; font: inherit; }
     #session-progress { position: fixed; left: 24px; right: 24px; bottom: 20px; display: flex; justify-content: space-between; align-items: center; gap: 16px; pointer-events: none; font-size: 13px; color: #111; }
     #session-progress-label { padding: 8px 12px; background: #fff; border: 1px solid #ccc; border-radius: 3px; }
     #stop-session { pointer-events: auto; padding: 8px 12px; background: #fff; color: #111; border: 1px solid #aaa; border-radius: 3px; font: inherit; }
@@ -373,6 +452,8 @@ import { trainingCatalog } from '../data/training-catalog';
     dialog[data-phase='checkbox'] { width: 304px; border: 0; background: transparent; }
     dialog[data-phase='checkbox'][data-kind='turnstile'] { width: 300px; }
     dialog[data-phase='challenge'][data-kind='slider'] { width: min(380px, calc(100% - 32px)); }
+    dialog[data-phase='challenge'] :global(#image-challenge), dialog[data-phase='challenge'] :global(#slider-challenge) { max-height: calc(100dvh - 96px); overflow-y: auto; }
+    .selection :is(input, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
     dialog::backdrop { background: #ffffffb3; backdrop-filter: blur(7px); }
     #close-challenge { display: grid; place-items: center; position: absolute; right: -5px; top: -36px; width: 28px; height: 28px; padding: 0; color: #555; background: transparent; border: 0; border-radius: 3px; }
     #close-challenge:hover { color: #000; background: #eee; }

@@ -18,7 +18,8 @@ export const trainingCatalog: readonly TrainingChallenge[] = [
 ];
 
 export function partitionTrainingCatalog(trainingPercent: number): readonly TrainingChallenge[] {
-  const percent = Math.max(10, Math.min(90, Math.round(trainingPercent)));
+  const percent = Number.isFinite(trainingPercent)
+    ? Math.max(10, Math.min(90, Math.round(trainingPercent))) : 80;
   const imageTrainCount = Math.round(imageChallenges.length * percent / 100);
   const sliderTrainCount = Math.round(sliderChallenges.length * percent / 100);
   return trainingCatalog.map((challenge) => ({
