@@ -275,6 +275,11 @@ cmd_fit() {
   run_hw bash -c "cd /repo/touch && python correction.py $*"
 }
 
+cmd_teach-dirs() {
+  run_hw python /repo/touch/teach_dirs.py --follower-port "$FOLLOWER_PORT" --leader-port "$LEADER_PORT" \
+    --follower-id "$FOLLOWER_ID" --leader-id "$LEADER_ID" --robot "$ROBOT" "$@"
+}
+
 cmd_set-home() {
   run_hw python /repo/touch/set_home.py --follower-port "$FOLLOWER_PORT" --leader-port "$LEADER_PORT" \
     --follower-id "$FOLLOWER_ID" --leader-id "$LEADER_ID" --robot "$ROBOT"
@@ -392,6 +397,7 @@ GPU machine
 
 Touch screen
   touch-calib               Teach the arm 9 dots on touch/calib.html
+  teach-dirs                Show the robot 'back and forth' (the tap) and 'up' with the leader arm
   set-home                  Re-set only the home pose the arm returns to between taps
   tap u v [u v ...]         Tap screen points (0..1). --home parks the arm
   tap --test | --random N   Tap the targets / N random points, MEASURE, and update the aim correction
@@ -417,7 +423,7 @@ EOF
 
 c="${1:-help}"; shift || true
 case "$c" in
-  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice|cam-test|tip-test|heatmap|tip-live|share|smooth-preview|solve|plan|captcha)
+  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|teach-dirs|tap|see|fit|practice|cam-test|tip-test|heatmap|tip-live|share|smooth-preview|solve|plan|captcha)
     "cmd_$c" "$@" ;;
   *) cmd_help; exit 1 ;;
 esac

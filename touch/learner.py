@@ -294,7 +294,6 @@ def refine(tapper, server, model, exp, bandit, target, tol_px, max_tries, rng, l
         q_used = tapper.last_touch_q if tapper.last_touch_q is not None else q
         time.sleep(0.3)
         got = server.all_touches()
-        contacts = server.all_traces() if hasattr(server, "all_traces") else []
         if got:
             g = got[0]
             w, h = g.get("w") or 1000, g.get("h") or 1000
@@ -318,18 +317,12 @@ def refine(tapper, server, model, exp, bandit, target, tol_px, max_tries, rng, l
                          "touches": len(got), "force_stop": tapper.last_force_stop,
                          "vision_pred": lv.get("landing") if lv else None,
                          "vision_height": lv.get("height_mm", lv.get("height")) if lv else None,
-                         "press_height_mm": getattr(tapper, "last_press_height", None),
-                         "target": [float(u), float(v)], "landed": [got[0]["u"], got[0]["v"]] if got else None,
-                         "touch_q": [round(float(x), 2) for x in q_used],
-                         "drag_px": max((c.get("drag_px", 0) for c in contacts), default=None),
-                         "contact_ms": max((c.get("ms", 0) for c in contacts), default=None),
-                         "contacts": contacts, "motion": getattr(tapper, "tap_log", [])})
+                         "press_height_mm": getattr(tapper, "last_press_height", None)})
         log(f"   try {k} (zone {zone}): press {press:<4} {'slow' if slow < 1 else 'norm'} "
             + (f"miss {err_px:5.1f}px" if err_px is not None else
                ("NO TOUCH  " if getattr(tapper, "last_press_height", None) is None else
                 f"NO TOUCH, tip {tapper.last_press_height:4.1f}mm above glass"))
             + f"  reward {r:+.2f}" + ("  [force stop]" if tapper.last_force_stop else "")
-            + (f"  drag {attempts[-1]['drag_px']:.0f}px/{attempts[-1]['contact_ms']}ms" if attempts[-1]["drag_px"] is not None else "")
             + (("  [cam: " + ("tip not seen" if not lv or lv.get("landing") is None else
                 ("REJECTED (implausible)" if lv.get("rejected") else
                  f"predicted miss {np.hypot((lv['landing'][0] - u) * (w if got else 1000), (lv['landing'][1] - v) * (h if got else 1000)):.0f}px"))

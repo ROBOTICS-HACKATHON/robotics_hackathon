@@ -167,7 +167,9 @@ try:
     log = save_log("calib", calib)
     print(f"Session log: {log}")
     state.update(step=len(targets) + 1, msg="Done! Calibration saved.")
-    print(f"\nSaved {CALIB_FILE}. Check it with: ./lr tap --test")
+    print(f"\nSaved {CALIB_FILE}.")
+    print("Next: ./lr teach-dirs   (show the robot 'back and forth' = the tap, and 'up' along the screen)")
+    print("Then check it with: ./lr tap --test")
     time.sleep(1.5)  # let the page show "Done"
 finally:
     robot.disconnect()

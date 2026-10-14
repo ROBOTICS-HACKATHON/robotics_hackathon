@@ -169,7 +169,21 @@ class FrameSource:
                                    "Same Wi-Fi? App running? Address right?")
             f = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
         elif self.kind == "file":
-            f = cv2.imread(self.spec)
+            # the file may be mid-write (a screenshot tool overwriting it): read again until it decodes
+            f = None
+            for _ in range(60):
+                try:
+                    data = Path(self.spec).read_bytes()
+                except OSError:
+                    data = b""
+                # a JPEG is only complete when it ends with its end marker; half-written ones decode
+                # "fine" with the bottom missing, so check that first
+                complete = data.rstrip(b"\x00").endswith(b"\xff\xd9") if data[:2] == b"\xff\xd8" else len(data) > 0
+                if complete:
+                    f = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+                    if f is not None:
+                        break
+                time.sleep(0.03)
         else:
             ok, f = False, None
             for _ in range(5 if self.kind == "device" else 3):  # drop stale buffered frames

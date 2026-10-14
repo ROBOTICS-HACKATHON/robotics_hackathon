@@ -13,3 +13,6 @@ touch/servo_jacobian.json
 __pycache__/
 touch/site_layout.json
 .pytest_cache/
+touch/tap_style.json
+touch/tap_style.json
+touch/directions.json
