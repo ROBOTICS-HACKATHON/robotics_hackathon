@@ -21,6 +21,12 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; }
+/* The robot's stylus drags a little while it taps; that must never scroll, pan or zoom the page.
+   Touch is for tapping and the slider only. Mouse wheel and keyboard scrolling are unaffected. */
+html, body { overscroll-behavior: none; touch-action: none; }
+body { -webkit-user-select: none; user-select: none; }
+input, select, textarea { -webkit-user-select: auto; user-select: auto; }
+img { -webkit-user-drag: none; user-drag: none; }
 button, input { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { cursor: pointer; }

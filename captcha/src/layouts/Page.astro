@@ -18,6 +18,35 @@ const training = Astro.url.pathname.startsWith('/training') || Astro.url.pathnam
         document.documentElement.dataset.contrast = 'normal';
       }
     </script>
+    <script is:inline>
+      // The robot's stylus drags while it presses. Browsers drop the click when a touch moves more than a
+      // few pixels, so a tap that wanders would do nothing. If a touch/pen press ends without a native click,
+      // click the control that was first touched. The slider is left to its own drag handling.
+      (() => {
+        const MAX_TRAVEL = 150, WAIT_MS = 60;
+        const CONTROL = 'button, a[href], label, summary, input:not([type="range"])';
+        let down = null, nativeClick = false;
+        document.addEventListener('click', () => { nativeClick = true; }, true);
+        // Dragging across a picture would start an image drag-and-drop, which cancels the touch.
+        document.addEventListener('dragstart', (e) => e.preventDefault(), true);
+        document.addEventListener('pointermove', (e) => { if (down && e.isPrimary) { down.lx = e.clientX; down.ly = e.clientY; } }, true);
+        document.addEventListener('pointerdown', (e) => {
+          if (e.pointerType === 'mouse' || !e.isPrimary) return;
+          nativeClick = false;
+          const el = e.target instanceof Element ? e.target.closest(CONTROL) : null;
+          down = el && !el.disabled && !el.closest('.puzzle-canvas, input[type="range"]') ? { el, x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY } : null;
+        }, true);
+        const finish = (e, cancelled) => {
+          const start = down;
+          down = null;
+          if (!start || cancelled || e.pointerType === 'mouse' || !e.isPrimary) return;
+          if (Math.hypot(start.lx - start.x, start.ly - start.y) > MAX_TRAVEL) return;
+          setTimeout(() => { if (!nativeClick && start.el.isConnected && !start.el.disabled) start.el.click(); }, WAIT_MS);
+        };
+        document.addEventListener('pointerup', (e) => finish(e, false), true);
+        document.addEventListener('pointercancel', (e) => finish(e, false), true);
+      })();
+    </script>
   </head>
   <body>
     <header class="site-header">
