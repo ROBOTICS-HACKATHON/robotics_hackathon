@@ -9,6 +9,9 @@ const { title } = Astro.props;
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
+    <script is:inline>
+      document.documentElement.dataset.contrast = localStorage.getItem('captcha-contrast') === 'high' ? 'high' : 'normal';
+    </script>
   </head>
   <body><slot /></body>
 </html>

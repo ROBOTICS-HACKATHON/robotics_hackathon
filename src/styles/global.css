@@ -40,3 +40,25 @@ p { line-height: 1.5; }
 }
 .button.primary { color: white; background: var(--accent); border-color: var(--accent); }
 .muted { color: var(--muted); }
+
+:root[data-contrast='high'] {
+  font-size: 20px;
+  --text: #000;
+  --muted: #000;
+  --line: #000;
+  --accent: #000;
+}
+:root[data-contrast='high'] :is(.choice, dialog, .button, #human-checkbox, #close-challenge) {
+  border: 3px solid #000;
+}
+:root[data-contrast='high'] .checkbox-box { border: 4px solid #000; }
+:root[data-contrast='high'] .image-tile { border: 3px solid #000; }
+:root[data-contrast='high'] .image-tile[aria-pressed='true'] { outline: 4px solid #000; outline-offset: -6px; }
+:root[data-contrast='high'] .selection-mark { width: 40px; height: 40px; font-size: 26px; line-height: 40px; border: 2px solid white; }
+:root[data-contrast='high'] .image-tile img { filter: contrast(1.4); }
+:root[data-contrast='high'] .puzzle-canvas { filter: contrast(1.4); }
+:root[data-contrast='high'] :is(.image-status, #slider-status) { color: #000; font-weight: 600; }
+:root[data-contrast='high'] input[type='range']::-webkit-slider-thumb { background: #000; border: 2px solid white; width: 56px; height: 48px; margin-top: -21px; }
+:root[data-contrast='high'] input[type='range']::-moz-range-thumb { background: #000; border: 2px solid white; width: 52px; height: 44px; }
+:root[data-contrast='high'] input[type='range']::-webkit-slider-runnable-track { background: white; border: 2px solid #000; }
+:root[data-contrast='high'] input[type='range']::-moz-range-track { background: white; border: 2px solid #000; }

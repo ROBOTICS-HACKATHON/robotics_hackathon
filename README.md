@@ -14,6 +14,9 @@ opens over a blurred page. "Open fullscreen" uses browser fullscreen when availa
 Solving navigates to `/verified/` and keeps the completed challenge locked until
 "Start again" is clicked.
 
+"High contrast" uses black borders and controls, larger text and selection marks,
+and stronger image contrast. The preference is saved in the browser.
+
 Change the prompt, image paths, and `correct` values in `src/data/challenges.ts`.
 Put your images in `public/images/`; the grid expects nine tiles. The included
 photos are downloaded from Pexels; credits are in `public/images/SOURCES.md`.
