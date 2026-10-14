@@ -11,3 +11,5 @@ touch/cam_geometry.json
 lerobot/
 touch/servo_jacobian.json
 __pycache__/
+touch/site_layout.json
+.pytest_cache/

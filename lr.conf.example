@@ -40,6 +40,12 @@ CAM_WIDTH=640
 CAM_HEIGHT=480
 FPS=30
 
+# Captcha solver API (./lr solve, ./lr captcha). The Cloudflare values are a Workers AI token of
+# your own: keep them here in lr.conf (git-ignored), never commit them.
+SOLVER_URL=https://captchasolver.alvaro-camposmndz.workers.dev
+CLOUDFLARE_ACCOUNT_ID=
+CLOUDFLARE_API_TOKEN=
+
 # Recording timing (seconds)
 EPISODE_TIME=30
 RESET_TIME=15

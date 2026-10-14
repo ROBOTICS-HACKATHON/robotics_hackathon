@@ -169,6 +169,71 @@ with Tapper(port="/dev/ttyACM0") as arm:   # goes home when done
 
 The arm covers the screen while tapping, so call `see` **before** tapping, with the arm at home.
 
+## The whole loop on the real site (`./lr captcha`)
+
+```
+see -> page? -> choice/checkbox: tap | grid: solver API -> tap tiles -> see: right tiles? -> Verify -> see: pass/fail
+```
+
+Site: `https://skibidisigma67rizz.pages.dev/`, solver: `https://captchasolver.alvaro-camposmndz.workers.dev/` (`POST /api/robot/solve`).
+
+**One-time setup**
+
+1. `lr.conf`: set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` (a Workers AI token of yours; never commit it). `SOLVER_URL` is preset.
+2. On the site tick **Camera markers** (off by default; the camera needs them) and open it full-screen on the touch screen.
+3. Calibrate the arm (`./lr touch-calib`, optionally `./lr practice`).
+4. `./lr captcha --learn-layout`: show the choice page, the "I'm not a robot" box and the "Access granted" page, one after the other.
+   For each, the camera takes a photo and you click on it (browser, `http://localhost:8765/`) where the robot must tap.
+   It saves `touch/site_layout.json` (machine-specific, git-ignored). Redo it if the screen or browser zoom changes.
+   Shortcut to the "Access granted" page: *Training settings -> Practice mode -> Single tile*, click the highlighted tile.
+
+**Check before moving the arm**
+
+```bash
+./lr solve                  # camera -> solver -> prints the plan, never taps
+./lr captcha --dry-run      # the loop's reading and solving, arm stays still (grid must be open)
+```
+
+**Just the coordinates (no arm): `./lr plan`**
+
+`touch/plan_clicks.py` is the Playwright steps done from a photo. Give it one photo, it says what to click next as `u, v`:
+
+```bash
+./lr plan                                   # takes a camera photo now
+./lr plan --image /work/outputs/photo.jpg   # a raw photo of the screen (4 markers visible); add --straight if already straightened
+./lr plan --image photo.jpg --tiles 1,3,8 --full --annotate /work/outputs/plan.png   # no solver call, draws the clicks
+```
+
+It prints JSON: `state` (choice / checkbox / grid / grid_error / verified / unknown), `done`, and `clicks` with `role`, `tile`,
+`u`, `v` (and `x`, `y` in the 1280x800 frame). Only tiles that still differ from the solver's answer are listed; once the
+selection is right it returns Verify only (`--full` appends Verify after the tiles in one go). Pass `u v` to `./lr tap`.
+Choice / checkbox positions come from `--learn-layout` (or `--demo-layout` for the committed 1280x800 screenshots).
+
+**Run**
+
+```bash
+./lr captcha                # one challenge, starting from whichever page is showing
+./lr captcha --count 5      # five in a row (after a pass it taps "Start again"; stops at the first fail)
+```
+
+Every run saves its photos, the solver's answer, the plan and the result in `outputs/run/<time>/` and appends a line to
+`outputs/run/results.jsonl` (outcome, seconds): the scoreboard data.
+
+**What it will and won't do** (a second tap on a tile toggles it back, so nothing is tapped "to be sure")
+
+- The solver's tile positions must match the dialog found in the photo, otherwise nothing is tapped.
+- After the tile taps the arm goes home and the camera reads which tiles show the blue check. If the set differs, only the
+  differing tiles are tapped (max 2 rounds, `--max-fix`). Still wrong: it stops **without pressing Verify**.
+- Verify is pressed once. The result is read from the page: "Access granted" = pass, red "Incorrect selection" = fail,
+  nothing within 30 s = `unknown` (never counted as fail). `--verify-retries 1` allows one more Verify tap if the page did not react at all.
+- Camera can't see all 4 markers, page unknown, solver says "try again": it looks again (new photo), up to `--tries`.
+- Only the image grid (reCAPTCHA card) is handled. The slider needs a drag; Turnstile is a single checkbox tap and is not wired in yet.
+- Stop-on-touch is not available here (the site doesn't report touches to us); the arm relies on its calibration.
+
+**Offline tests** (no robot, no network): `.venv/bin/python -m pytest touch/tests -q`. They run the loop against real screenshots
+of the site (`touch/tests/shots/`, regenerate with `touch/tests/capture_site.py`). `SITE_E2E=1 ... pytest touch/tests/test_e2e_site.py`
+runs the loop against the live site in a headless browser (a mouse click stands in for the arm).
+
 ## Tuning
 
 | Problem | Fix |
