@@ -1,7 +1,7 @@
 ---
-import { sliderChallenge } from '../data/challenges';
+import { sliderChallenges } from '../data/slider-challenges';
 
-const { src, alt, targetX, targetY, pieceSize, tolerance } = sliderChallenge;
+const { src, alt, targetX, targetY, pieceSize, tolerance } = sliderChallenges[0];
 ---
 
 <section
@@ -9,6 +9,7 @@ const { src, alt, targetX, targetY, pieceSize, tolerance } = sliderChallenge;
   class="slider-challenge"
   hidden
   aria-labelledby="slider-title"
+  data-challenge-id={sliderChallenges[0].id}
   data-target-x={targetX}
   data-target-y={targetY}
   data-piece-size={pieceSize}
@@ -27,7 +28,7 @@ const { src, alt, targetX, targetY, pieceSize, tolerance } = sliderChallenge;
     <div class="puzzle-gap"></div>
     <div class="puzzle-piece"></div>
   </div>
-  <span class="sr-only">Puzzle image: {alt}</span>
+  <span class="sr-only puzzle-description">Puzzle image: {alt}</span>
 
   <div class="slider-control">
     <label for="puzzle-slider">Drag the slider to complete the puzzle</label>
