@@ -8,6 +8,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 source "$HERE/lr.conf"
 
+# Captcha solver (see touch/solve.py). Exported and passed into the container by NAME (-e VAR), so the
+# token never shows up in `ps`. Put the Cloudflare values in lr.conf (git-ignored), never in git.
+export SOLVER_URL="${SOLVER_URL:-https://captchasolver.alvaro-camposmndz.workers.dev}"
+export CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-}"
+export CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
+
 IMAGE=lerobot
 OUT="$HERE/outputs"
 mkdir -p "$OUT" "$LR_DATA"
@@ -64,7 +70,8 @@ run_hw() {
   need_image
   # shellcheck disable=SC2046
   # shellcheck disable=SC2086
-  $RT run --rm -it --privileged -v /dev:/dev -v "$HERE":/repo ${RUN_EXTRA:-} $(common_flags) "$IMAGE" "$@"
+  $RT run --rm -it --privileged -v /dev:/dev -v "$HERE":/repo ${RUN_EXTRA:-} $(common_flags) \
+    -e SOLVER_URL -e CLOUDFLARE_ACCOUNT_ID -e CLOUDFLARE_API_TOKEN "$IMAGE" "$@"
 }
 
 hf_user() {
@@ -265,6 +272,35 @@ cmd_see() {
   else say "Straightened screen: $OUT/screen.jpg"; fi
 }
 
+need_solver() {
+  [ -n "$CLOUDFLARE_ACCOUNT_ID" ] && [ -n "$CLOUDFLARE_API_TOKEN" ] \
+    || die "set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in lr.conf (Workers AI token), SOLVER_URL is $SOLVER_URL"
+}
+
+# Camera -> straightened screenshot -> solver API -> prints the presses. Never taps.
+cmd_solve() {
+  need_solver
+  run_hw python /repo/touch/solve.py --camera "$CAMERA" --out /work/outputs/solve --delay "${DELAY:-5}" "$@"
+}
+
+# One photo in, "click here next" out (relative u, v). Never moves the arm. Without --image it takes a camera photo.
+cmd_plan() {
+  case " $* " in *" --tiles "*) ;; *) need_solver ;; esac
+  case " $* " in
+    *" --image "*) run_hw python /repo/touch/plan_clicks.py "$@" ;;
+    *) run_hw python /repo/touch/plan_clicks.py --camera "$CAMERA" --delay "${DELAY:-5}" "$@" ;;
+  esac
+}
+
+# The whole loop: see -> page state -> solver -> tap tiles -> check -> Verify -> read result.
+# Needs a calibration (./lr touch-calib) and the page open full-screen on the touch screen.
+cmd_captcha() {
+  case " $* " in *" --learn-layout "*) ;; *) need_solver ;; esac
+  # shellcheck disable=SC2046
+  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/run_captcha.py $(ARM_ARGS) --camera "$CAMERA" --out /work/outputs/run \
+    --delay "${DELAY:-5}" "$@"
+}
+
 cmd_tip-test() {
   local cams="${1:-}"
   [ -z "$cams" ] && { cams="${CAMERA:-}"; [ -n "${CAMERA2:-}" ] && cams="${cams:+$cams,}$CAMERA2"; }
@@ -321,6 +357,10 @@ Touch screen
   heatmap                   Accuracy per screen zone (9 zones) + the best press/speed each zone learned
   fit [--reset]             Refit (or remove) the aim correction from all test logs
   see                       Camera -> straightened screenshot in outputs/screen.jpg
+  solve                     Camera -> screenshot -> solver API -> prints where to press (no arm, never taps)
+  plan [--image FILE]       One photo -> JSON of what to click next, as u,v (0..1). Never moves the arm
+  captcha [--count N]       Full loop on the real site: see, solve, tap tiles, check, Verify, read result
+                            (--learn-layout teaches the choice/checkbox pages once; --dry-run = camera + solver, no arm)
   cam-test [CAMERA]         Test a camera (USB or phone): resolution, speed, markers found
   tip-test [CAM1,CAM2]      Tip vision check: sticker found?, viewing angles, can the pair measure height?
   tip-live                  Live browser view of both cameras + tip height in mm (no arm needed)
@@ -331,7 +371,7 @@ EOF
 
 c="${1:-help}"; shift || true
 case "$c" in
-  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice|cam-test|tip-test|heatmap|tip-live)
+  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice|cam-test|tip-test|heatmap|tip-live|solve|plan|captcha)
     "cmd_$c" "$@" ;;
   *) cmd_help; exit 1 ;;
 esac

@@ -48,4 +48,5 @@ Good CAPTCHA types: 3×3 image grid ("select all with X"), "tap in order 1-2-3",
 1. **In parallel (~1–2 h):** robot calibrated and `./lr tap --test` hits all 9 dots · first 3×3 CAPTCHA + accuracy page · agent working on screenshots
 2. **Measure the arm (~30 min):** 30 random dots on the accuracy page, aim for ≥95% hits on 2 cm targets
 3. **Connect it all (~1 h):** loop `see → agent → tap → see (read ✓/✗)` → next CAPTCHA, retry once on failure
+   - Built: `./lr captcha` (`touch/run_captcha.py`), see "The whole loop on the real site" in `touch/README.md`. It uses the team's solver API (`/api/robot/solve`) as the agent.
 4. **Improve the demo:** more CAPTCHA types, faster taps (`--speed 1.5`), live scoreboard, dragging as a stretch goal

@@ -75,3 +75,12 @@ Touch screen:
 - Windows-edited files may have CRLF line endings; the override hook strips `\r`.
 - Don't commit `touch/screen_calib.json`, `touch/experience.json`, `touch/logs/`, `touch/screen_correction.json`, `outputs/` (machine-specific; already in `.gitignore`).
 - Git pushes often get rejected because teammates pushed: `git pull --rebase origin main && git push`.
+
+## Full captcha loop (added later)
+
+`./lr captcha` (`touch/run_captcha.py`) runs: see → page state → solver API (`/api/robot/solve`, `touch/solve.py`) → tap tiles →
+read the selection (`touch/verify_selection.py`) → fix only differing tiles → Verify once → read pass/fail (`touch/pagestate.py`).
+Needs `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN` in `lr.conf`, "Camera markers" ticked on the site, and
+`./lr captcha --learn-layout` once (writes the git-ignored `touch/site_layout.json`). Docs: "The whole loop on the real site" in `touch/README.md`.
+Offline tests: `.venv/bin/python -m pytest touch/tests -q` (real screenshots in `touch/tests/shots/`). **Never run against hardware untested:**
+the loop is verified only against screenshots and a headless browser, not the real arm/camera. Order: `./lr solve`, `./lr captcha --dry-run`, then `./lr captcha`.
