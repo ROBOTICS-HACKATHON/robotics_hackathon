@@ -1,6 +1,7 @@
 ---
 import Page from '../layouts/Page.astro';
 import ImageChallenge from '../components/ImageChallenge.astro';
+import SliderChallenge from '../components/SliderChallenge.astro';
 ---
 <Page title="Not a robot · CAPTCHA demo">
   <main class="selection">
@@ -8,7 +9,7 @@ import ImageChallenge from '../components/ImageChallenge.astro';
     <p class="muted">Choose a challenge to verify that you're human.</p>
     <div class="choices">
       <button class="choice" data-challenge="image"><strong>Image grid</strong><span>Select the matching images.</span><span aria-hidden="true">→</span></button>
-      <button class="choice" data-challenge="slider" disabled><strong>Slider puzzle</strong><span>Slide the piece into the gap.</span><span aria-hidden="true">→</span></button>
+      <button class="choice" data-challenge="slider"><strong>Slider puzzle</strong><span>Slide the piece into the gap.</span><span aria-hidden="true">→</span></button>
     </div>
     <label class="fullscreen-option"><input type="checkbox" id="fullscreen" checked /> Open fullscreen</label>
     <p id="fullscreen-status" class="muted" role="status"></p>
@@ -19,12 +20,14 @@ import ImageChallenge from '../components/ImageChallenge.astro';
       <button id="human-checkbox" type="button"><span class="checkbox-box" aria-hidden="true"></span><span>I'm not a robot</span></button>
     </div>
     <ImageChallenge />
+    <SliderChallenge />
   </dialog>
   <script>
     const dialog = document.querySelector<HTMLDialogElement>('#challenge-dialog');
     const checkbox = document.querySelector<HTMLButtonElement>('#human-checkbox');
     const checkboxStep = document.querySelector<HTMLElement>('#checkbox-step');
     const image = document.querySelector<HTMLElement>('#image-challenge');
+    const slider = document.querySelector<HTMLElement>('#slider-challenge');
     const close = document.querySelector<HTMLButtonElement>('#close-challenge');
     const fullscreen = document.querySelector<HTMLInputElement>('#fullscreen');
     const fullscreenStatus = document.querySelector<HTMLElement>('#fullscreen-status');
@@ -44,6 +47,7 @@ import ImageChallenge from '../components/ImageChallenge.astro';
           document.dispatchEvent(new Event('challenge-reset'));
           checkboxStep.hidden = false;
           image.hidden = true;
+          if (slider) slider.hidden = true;
           if (fullscreen?.checked && !document.fullscreenElement) {
             await document.documentElement.requestFullscreen().catch(() => {
               if (fullscreenStatus) fullscreenStatus.textContent = 'Fullscreen is unavailable. The challenge still works in this window.';
@@ -54,8 +58,11 @@ import ImageChallenge from '../components/ImageChallenge.astro';
       });
       checkbox.addEventListener('click', () => {
         checkboxStep.hidden = true;
-        image.hidden = false;
-        image.querySelector<HTMLButtonElement>('button')?.focus();
+        const challenge = kind === 'slider' ? slider : image;
+        if (challenge) {
+          challenge.hidden = false;
+          challenge.querySelector<HTMLElement>('input, button')?.focus();
+        }
       });
       close.addEventListener('click', () => dialog.close());
       dialog.addEventListener('close', () => {

@@ -12,3 +12,12 @@ export const imageChallenge = {
     { src: '/images/cat-3.jpg', alt: 'A tabby cat', correct: true },
   ],
 } as const;
+
+export const sliderChallenge = {
+  src: '/images/landscape.jpg',
+  alt: 'Mountains reflected in a lake',
+  targetX: 0.62,
+  targetY: 0.35,
+  pieceSize: 0.16,
+  tolerance: 0.025,
+} as const;
