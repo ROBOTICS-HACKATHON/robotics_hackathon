@@ -115,7 +115,13 @@ def ranges_from_pixels(px):
     hue = px[:, 0] * 2 * np.pi / 180
     centre = (np.degrees(np.arctan2(np.sin(hue).mean(), np.cos(hue).mean())) / 2) % 180  # circular mean
     dev = np.abs((px[:, 0] - centre + 90) % 180 - 90)
-    half = float(np.clip(np.percentile(dev, 95) + 5, 8, 30))
+    # a few clicks next to the tip (background, banner, skin) must not widen the colour: keep the main hue
+    keep = dev <= max(12.0, float(np.percentile(dev, 70)) * 2)
+    px, dev = px[keep], dev[keep]
+    hue = px[:, 0] * 2 * np.pi / 180
+    centre = (np.degrees(np.arctan2(np.sin(hue).mean(), np.cos(hue).mean())) / 2) % 180
+    dev = np.abs((px[:, 0] - centre + 90) % 180 - 90)
+    half = float(np.clip(np.percentile(dev, 95) + 5, 8, 18))
     # generous on saturation/brightness: shade, glare and a new viewing angle all make the tip duller
     s_lo = int(np.clip(np.percentile(px[:, 1], 5) - 50, 100, 180))
     v_lo = int(np.clip(np.percentile(px[:, 2], 5) - 70, 50, 160))
@@ -148,7 +154,8 @@ def find_tip(frame, color, quad=None, min_area=12):
     mean_s = np.bincount(labels.ravel(), weights=sat.ravel(), minlength=n) / np.maximum(stats[:, cv2.CC_STAT_AREA], 1)
     a = stats[:, cv2.CC_STAT_AREA].astype(float)
     w, h = stats[:, cv2.CC_STAT_WIDTH].astype(float), stats[:, cv2.CC_STAT_HEIGHT].astype(float)
-    score = (mean_s / 255) ** 6 * a * (a / np.maximum(w * h, 1)) * (np.minimum(w, h) / np.maximum(np.maximum(w, h), 1))
+    # size counts only up to a marker-sized blob, so a big coloured poster can't win on size
+    score = (mean_s / 255) ** 6 * np.minimum(a, 4000) * (a / np.maximum(w * h, 1)) * (np.minimum(w, h) / np.maximum(np.maximum(w, h), 1))
     if quad is not None:  # the tip is over the screen: things beside it (desk, background) count much less
         inside = np.array([cv2.pointPolygonTest(quad.reshape(-1, 1, 2), (float(x), float(y)), False) >= 0
                            for x, y in cents])
