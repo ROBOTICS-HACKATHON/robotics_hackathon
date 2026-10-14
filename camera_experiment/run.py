@@ -8,9 +8,10 @@ import io
 import json
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Literal, TypeVar, cast
+from typing import Literal, cast
 
 import cv2
 import numpy as np
@@ -41,9 +42,9 @@ from camera_experiment.geometry import (
 from camera_experiment.pose import estimate_pose
 from camera_experiment.remote import grid_tiles
 
-T = TypeVar("T")
 Record = dict[str, object]
 VARIANTS = ("original", "blur", "jpeg", "lowres", "noise", "dark", "combined")
+DIRECT_ENDPOINT: Option[str] = Nothing()
 
 
 @dataclass(frozen=True)
@@ -143,7 +144,7 @@ def png(image: Image.Image) -> bytes:
 
 
 async def solve(screen: Screen, layout: Layout, model: str,
-                endpoint: Option[str] = Nothing()) -> Result[Record, Failure]:
+                endpoint: Option[str] = DIRECT_ENDPOINT) -> Result[Record, Failure]:
     outcome = await async_attempt("captcha solve", lambda: _solve(screen, layout, model, endpoint))
     return outcome.value if isinstance(outcome, Ok) else outcome
 
@@ -152,6 +153,8 @@ async def _solve(screen: Screen, layout: Layout, model: str, endpoint: Option[st
     async with WorkersAI(concurrency=3) as ai:
         image = Image.fromarray(cv2.cvtColor(screen.image, cv2.COLOR_BGR2RGB))
         target = await read_target(ai, image, layout, model=model)
+        if not 1 <= len(target.split()) <= 4:
+            return Err(Failure.OPERATION, context_msg=f"banner unreadable: expected a short target label, got {target!r}")
         x, y, w, h = layout.grid
         crop = png(image.crop((x, y, x + w, y + h)))
         if isinstance(endpoint, Some):
@@ -376,7 +379,12 @@ def annotate_source(frame: Frame, actions: list[Record]) -> Frame:
     return image
 
 
-async def run(args: Options) -> Result[int, Failure]:
+def print_record(record: Record) -> Result[None, Failure]:
+    return attempt("print progress", lambda: print(Path(cast(str, record["source"])).name,
+                                                   record["variant"], record["status"], flush=True))
+
+
+async def run(args: Options, progress: Callable[[Record], Result[None, Failure]] = print_record) -> Result[int, Failure]:
     paths = attempt("list photos", lambda: [args.images] if args.images.is_file() else
                     sorted(path for path in args.images.iterdir()
                            if path.suffix.lower() in (".jpg", ".jpeg", ".png") and path.is_file()))
@@ -396,7 +404,9 @@ async def run(args: Options) -> Result[int, Failure]:
             else:
                 record = result.value
             records.append(record)
-            print(path.name, variant, record["status"], flush=True)
+            shown = progress(record)
+            if isinstance(shown, Err):
+                return shown
             saved = save_json(args.out / "report.json", {"seed": args.seed, "model": args.model,
                                                         "records": records})
             if isinstance(saved, Err):

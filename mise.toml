@@ -20,3 +20,7 @@ run = "camera_experiment/.venv/bin/python -m camera_experiment.run"
 [tasks."camera:report"]
 env = { PYTHONDONTWRITEBYTECODE = "1" }
 run = "camera_experiment/.venv/bin/python -m camera_experiment.compare"
+
+[tasks."camera:all"]
+description = "Solve all photos, compare degraded variants, and open the visual report"
+run = "bash camera_experiment/all.sh"

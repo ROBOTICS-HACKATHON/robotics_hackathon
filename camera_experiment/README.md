@@ -4,7 +4,34 @@ Uses the ten photos in `/home/veya/Downloads/asodkasodkasd` without modifying th
 Five have an open CAPTCHA; five are useful negative controls. Detection and solving
 use pixels only. `expected.json` contains human photo labels used only for evaluation.
 
-Setup from the repository root:
+Run everything and open the visual report from the repository root:
+
+```sh
+mise run camera:all
+```
+
+This processes all ten photos and seven quality variants, normalizes the useful
+content, and maps tile and Verify locations back to source pixels. Banner reading
+uses Workers AI; normalized grids go to
+`https://captchasolver.alvaro-camposmndz.workers.dev/api/solve`.
+The report shows 🤓 for exact matches or correct absence and 🥀 for mismatches
+and failures, with reasons. A returned plan on an unlabelled photo is identified
+as unverified. JSON tile indexes are zero-based; the coordinate viewer labels
+tiles 1–9. Service or banner-reading errors return a nonzero exit status after
+writing and opening the report.
+
+Credentials are loaded from the environment or
+`~/.config/captchasolver/credentials.env` (shell exports, kept outside the repo).
+The command sets up its Python environment on first use. Output is
+`camera_experiment/results-all/index.html`, with downloadable JSON per image.
+Use `mise run camera:all --no-solve` for offline geometry only,
+`--no-open` to leave the browser closed, or supply another image directory:
+
+```sh
+mise run camera:all /path/to/images --variants original
+```
+
+Manual setup from the repository root:
 
 ```sh
 uv venv camera_experiment/.venv
