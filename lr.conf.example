@@ -1,0 +1,28 @@
+# Copy to lr.conf and edit. Only the robot laptop needs the hardware lines.
+
+# Arms (SO-101; use so100 for SO-100 arms)
+ROBOT=so101
+FOLLOWER_PORT=/dev/ttyACM0
+LEADER_PORT=/dev/ttyACM1
+FOLLOWER_ID=my_follower
+LEADER_ID=my_leader
+
+# Camera (find the color one with: ./lr cams)
+CAMERA=/dev/video4
+CAM_WIDTH=640
+CAM_HEIGHT=480
+FPS=30
+
+# Recording timing (seconds)
+EPISODE_TIME=30
+RESET_TIME=15
+
+# WSL only: usbipd bus IDs, attached in this order (see `usbipd list` in Windows)
+USB_BUSIDS="3-1 3-2 4-1"
+
+# Where calibration + Hugging Face login are kept on this machine.
+# The default reuses anything you set up before without Docker.
+LR_DATA=$HOME/.cache/huggingface
+
+# Optional: set your Hugging Face username instead of detecting it
+# HF_USER=yourname

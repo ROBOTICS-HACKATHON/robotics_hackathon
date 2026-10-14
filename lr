@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+# lr: one command for the whole LeRobot workflow, everything runs in a container.
+# Run `./lr help` for the list of commands.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[ -f "$HERE/lr.conf" ] || cp "$HERE/lr.conf.example" "$HERE/lr.conf"
+# shellcheck source=/dev/null
+source "$HERE/lr.conf"
+
+IMAGE=lerobot
+OUT="$HERE/outputs"
+mkdir -p "$OUT" "$LR_DATA"
+
+# ---------- helpers ----------
+die() { echo "lr: $*" >&2; exit 1; }
+say() { echo -e "\033[1;34m==>\033[0m $*"; }
+
+if command -v docker >/dev/null 2>&1; then RT=docker
+elif command -v podman >/dev/null 2>&1; then RT=podman
+else die "install Docker (sudo apt install docker.io) or Podman first"; fi
+
+is_wsl() { grep -qi microsoft /proc/version 2>/dev/null; }
+
+detect_gpu() {
+  if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then echo nvidia
+  elif [ -e /dev/kfd ]; then echo rocm
+  else echo cpu; fi
+}
+
+# Flags that let the container use this machine's GPU
+gpu_flags() {
+  case "$(detect_gpu)" in
+    nvidia) if [ "$RT" = podman ]; then echo "--device nvidia.com/gpu=all"; else echo "--gpus all"; fi ;;
+    rocm)   echo "--device /dev/kfd --device /dev/dri --security-opt label=disable" ;;
+    cpu)    echo "" ;;
+  esac
+}
+
+# Run as your own user so files in your home don't end up owned by root
+user_flags() {
+  if [ "$RT" = podman ]; then
+    echo "--userns=keep-id --group-add keep-groups"
+  else
+    local f g
+    f="--user $(id -u):$(id -g)"
+    for g in dialout video render plugdev; do
+      getent group "$g" >/dev/null && f="$f --group-add $(getent group "$g" | cut -d: -f3)"
+    done
+    echo "$f"
+  fi
+}
+
+common_flags() {
+  echo "$(user_flags) -e HOME=/tmp -e HF_HOME=/hf -v $LR_DATA:/hf -v $OUT:/work/outputs --ipc=host"
+}
+
+need_image() {
+  $RT image inspect "$IMAGE" >/dev/null 2>&1 || die "image not built yet, run: ./lr build"
+}
+
+# Interactive run with access to USB devices (arms + camera)
+run_hw() {
+  need_image
+  # shellcheck disable=SC2046
+  $RT run --rm -it --privileged -v /dev:/dev $(common_flags) "$IMAGE" "$@"
+}
+
+hf_user() {
+  if [ -n "${HF_USER:-}" ]; then echo "$HF_USER"; return; fi
+  need_image
+  # shellcheck disable=SC2046
+  $RT run --rm $(common_flags) "$IMAGE" \
+    python -c 'from huggingface_hub import whoami; print(whoami()["name"])' 2>/dev/null \
+    || die "not logged in to Hugging Face, run: ./lr login"
+}
+
+ROBOT_ARGS() {
+  echo "--robot.type=${ROBOT}_follower --robot.port=$FOLLOWER_PORT --robot.id=$FOLLOWER_ID"
+}
+TELEOP_ARGS() {
+  echo "--teleop.type=${ROBOT}_leader --teleop.port=$LEADER_PORT --teleop.id=$LEADER_ID"
+}
+CAM_ARG="--robot.cameras={front: {type: opencv, index_or_path: $CAMERA, width: $CAM_WIDTH, height: $CAM_HEIGHT, fps: $FPS}}"
+TIMING_ARGS="--dataset.fps=$FPS --dataset.episode_time_s=$EPISODE_TIME --dataset.reset_time_s=$RESET_TIME --display_data=false"
+
+# ---------- commands ----------
+cmd_build() {
+  local gpu="${1:-$(detect_gpu)}"
+  say "Building image '$IMAGE' for: $gpu (takes 5-20 min the first time)"
+  $RT build --build-arg GPU="$gpu" -t "$IMAGE" -f "$HERE/docker/Dockerfile" "$HERE/docker"
+  say "Done. Next: ./lr login"
+}
+
+cmd_login() {
+  need_image
+  # shellcheck disable=SC2046
+  $RT run --rm -it $(common_flags) "$IMAGE" hf auth login
+  say "Logged in as: $(hf_user)"
+}
+
+cmd_attach() {
+  is_wsl || { say "Not WSL, nothing to attach. Devices:"; cmd_ports; return; }
+  local usbipd="/mnt/c/Program Files/usbipd-win/usbipd.exe" id
+  [ -x "$usbipd" ] || usbipd="usbipd.exe"
+  for id in $USB_BUSIDS; do
+    "$usbipd" attach --wsl --busid "$id" || true
+    sleep 1
+  done
+  sleep 2
+  sudo chmod 666 /dev/ttyACM* /dev/ttyUSB* /dev/video* 2>/dev/null || true
+  cmd_ports
+}
+
+cmd_ports() {
+  echo "Serial ports: $(ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null | tr '\n' ' ' || true)"
+  echo "Cameras:      $(ls /dev/video* 2>/dev/null | tr '\n' ' ' || true)"
+}
+
+cmd_cams() {
+  run_hw lerobot-find-cameras opencv
+  say "Test images saved in: $OUT/captured_images  (use the one that looks like a normal photo)"
+}
+
+cmd_snap() {
+  run_hw python -c "
+import cv2, time
+c = cv2.VideoCapture('$CAMERA'); c.set(3, $CAM_WIDTH); c.set(4, $CAM_HEIGHT); time.sleep(1)
+ok = False
+for _ in range(10): ok, f = c.read()
+if ok: cv2.imwrite('/work/outputs/snap.jpg', f); print('saved')
+else: print('No frame: is the camera attached? try ./lr attach and ./lr cams')"
+  if [ -f "$OUT/snap.jpg" ] && is_wsl; then explorer.exe "$(wslpath -w "$OUT/snap.jpg")" || true
+  else say "Picture: $OUT/snap.jpg"; fi
+}
+
+cmd_calibrate() {
+  # shellcheck disable=SC2046
+  case "${1:-}" in
+    follower) run_hw lerobot-calibrate $(ROBOT_ARGS) ;;
+    leader)   run_hw lerobot-calibrate $(TELEOP_ARGS) ;;
+    *) die "usage: ./lr calibrate follower|leader" ;;
+  esac
+}
+
+cmd_teleop() {
+  # shellcheck disable=SC2046
+  run_hw lerobot-teleoperate $(ROBOT_ARGS) $(TELEOP_ARGS)
+}
+
+cmd_test() {
+  local u; u=$(hf_user)
+  # shellcheck disable=SC2046
+  run_hw lerobot-record $(ROBOT_ARGS) "$CAM_ARG" $(TELEOP_ARGS) $TIMING_ARGS \
+    --dataset.repo_id="$u/test_run_$(date +%s)" --dataset.num_episodes=2 \
+    --dataset.single_task="test" --dataset.push_to_hub=false
+}
+
+cmd_record() {
+  [ $# -ge 3 ] || die 'usage: ./lr record <dataset_name> <episodes> "<task description>" [--resume=true]'
+  local name="$1" n="$2" task="$3"; shift 3
+  local u; u=$(hf_user)
+  say "Recording $n episodes into $u/$name"
+  # shellcheck disable=SC2046
+  run_hw lerobot-record $(ROBOT_ARGS) "$CAM_ARG" $(TELEOP_ARGS) $TIMING_ARGS \
+    --dataset.repo_id="$u/$name" --dataset.num_episodes="$n" \
+    --dataset.single_task="$task" "$@"
+  say "Check it uploaded: https://huggingface.co/datasets/$u/$name"
+}
+
+cmd_train() {
+  [ $# -ge 1 ] || die "usage: ./lr train <dataset_name> [steps]"
+  need_image
+  local name="$1" steps="${2:-30000}" u; u=$(hf_user)
+  local cname="train_$name"
+  $RT rm -f "$cname" >/dev/null 2>&1 || true
+  say "Training on $(detect_gpu): $u/$name -> $u/${name}_policy ($steps steps)"
+  # shellcheck disable=SC2046
+  $RT run -d --name "$cname" $(common_flags) $(gpu_flags) "$IMAGE" \
+    lerobot-train \
+      --dataset.repo_id="$u/$name" \
+      --policy.type=act \
+      --policy.device="$( [ "$(detect_gpu)" = cpu ] && echo cpu || echo cuda )" \
+      --policy.repo_id="$u/${name}_policy" \
+      --output_dir="outputs/train/${name}_$(date +%Y%m%d_%H%M)" \
+      --job_name="$name" \
+      --wandb.enable=false \
+      --steps="$steps" >/dev/null
+  say "Started in the background. Watch: ./lr logs $name   Stop: ./lr stop $name"
+}
+
+cmd_logs()   { $RT logs -f "train_${1:?usage: ./lr logs <dataset_name>}"; }
+cmd_stop()   { $RT stop "train_${1:?usage: ./lr stop <dataset_name>}"; }
+cmd_status() { $RT ps -a --filter name=train_; }
+
+cmd_gputest() {
+  need_image
+  # shellcheck disable=SC2046
+  $RT run --rm $(gpu_flags) "$IMAGE" python -c \
+    "import torch; ok=torch.cuda.is_available(); print('GPU available:', ok, torch.cuda.get_device_name(0) if ok else '')"
+}
+
+cmd_run() {
+  [ $# -ge 2 ] || die 'usage: ./lr run <user/policy or dataset_name> "<task description>" [episodes]'
+  local p="$1" task="$2" n="${3:-10}" u; u=$(hf_user)
+  case "$p" in */*) ;; *) p="$u/${p}_policy" ;; esac
+  say "Running policy $p ($n episodes). The follower moves by itself, keep clear."
+  # shellcheck disable=SC2046
+  run_hw lerobot-record $(ROBOT_ARGS) "$CAM_ARG" $TIMING_ARGS \
+    --policy.path="$p" \
+    --dataset.repo_id="$u/eval_$(basename "$p")_$(date +%s)" --dataset.num_episodes="$n" \
+    --dataset.single_task="$task" --dataset.push_to_hub=false
+}
+
+cmd_shell() { run_hw bash; }
+
+cmd_help() {
+  cat <<'EOF'
+Usage: ./lr <command>
+
+Setup (once per machine)
+  build [cpu|nvidia|rocm]   Build the image (GPU type is auto-detected)
+  login                     Log in to Hugging Face (paste a WRITE token)
+
+Robot laptop
+  attach                    WSL: attach arms + camera from Windows, fix permissions
+  ports                     Show serial ports and cameras
+  cams                      Save a test picture from every camera
+  snap                      Take one picture with the configured camera
+  calibrate follower|leader Calibrate an arm
+  teleop                    Leader arm drives the follower
+  test                      Record 2 throwaway episodes
+  record NAME N "TASK"      Record N episodes and upload (add --resume=true to continue)
+  run NAME "TASK"           Let the trained policy do the task by itself
+
+GPU machine
+  gputest                   Check the container can see the GPU
+  train NAME [STEPS]        Train on dataset NAME in the background (default 30000 steps)
+  logs NAME | stop NAME     Follow / stop training
+  status                    List training jobs
+
+  shell                     Open a shell inside the container
+EOF
+}
+
+c="${1:-help}"; shift || true
+case "$c" in
+  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help)
+    "cmd_$c" "$@" ;;
+  *) cmd_help; exit 1 ;;
+esac
