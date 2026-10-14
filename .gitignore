@@ -9,4 +9,5 @@ touch/tip_model.json
 touch/tip_color.json
 touch/cam_geometry.json
 lerobot/
+touch/servo_jacobian.json
 __pycache__/

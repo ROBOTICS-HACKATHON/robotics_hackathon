@@ -669,6 +669,8 @@ LIVE_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Tip live 
  nav input[type=range]{width:140px;vertical-align:middle} nav b{display:inline-block;min-width:22px}
  select,button{background:#2a2a2a;color:#eee;border:1px solid #444;border-radius:4px;padding:3px 8px}
  #map{position:relative;aspect-ratio:1.78;background:#fff;border-radius:6px;max-width:420px}
+ #tgt{position:absolute;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;border:4px solid #f90;display:none;box-sizing:border-box}
+ #map{cursor:crosshair}
  #dot{position:absolute;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;background:#e2b300;display:none}
 </style></head><body>
 <header>
@@ -704,7 +706,9 @@ LIVE_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Tip live 
 </nav>
 <div id="pick" style="padding:6px 20px;color:#ffcc55;min-height:20px"></div>
 <main><div><img id="c0"></div><div><img id="c1"></div>
-<div><span class="lbl">where the tip is over the screen</span><div id="map"><div id="dot"></div></div></div></main>
+<div><span class="lbl">where the tip is over the screen &mdash; click to put the orange target</span>
+<div id="map"><div id="dot"></div><div id="tgt"></div></div>
+<div id="xyz" style="font-size:20px;margin-top:8px;font-variant-numeric:tabular-nums"></div></div></main>
 <script>
 const $=id=>document.getElementById(id);
 let fps=15; try{fps=+localStorage.getItem('fps')||15}catch(e){}
@@ -723,6 +727,8 @@ for(const i of [0,1]) $('c'+i).onclick=e=>{ const el=e.target;
   say('/click?cam='+i+'&x='+(e.offsetX/el.clientWidth).toFixed(4)+'&y='+(e.offsetY/el.clientHeight).toFixed(4)); };
 $('snap').onclick=()=>say('/snap');
 $('reset').onclick=()=>{ if(confirm('Forget the taught pen colour and go back to TIP_COLOR?')) say('/reset'); };
+$('map').onclick=e=>{ const r=$('map').getBoundingClientRect(); const u=(e.clientX-r.left)/r.width, v=(e.clientY-r.top)/r.height;
+  const t=$('tgt'); t.style.display='block'; t.style.left=(u*100)+'%'; t.style.top=(v*100)+'%'; ctl('target='+u.toFixed(4)+','+v.toFixed(4)); };
 $('t0').onclick=()=>say('/teach?mm=0');
 $('tr').onclick=()=>say('/teach?mm='+(+$('trmm').value||80));
 $('tforget').onclick=()=>{ if(confirm('Forget the taught distances?')) say('/teach?forget=1'); };
@@ -747,6 +753,9 @@ async function tick(){
     document.getElementById('tl').textContent = (s.cam_tilt||[]).map((t,i)=>'cam '+(i+1)+': '+(t==null?'no screen':t+'° from straight-on')).join('   ');
     for(const i of [0,1]){ document.getElementById('c'+i).src='/cam'+i+'.jpg?t='+Date.now(); }
     if(s.aspect) $('map').style.aspectRatio=s.aspect;
+    const X=$('xyz');
+    if(s.to_target){ const d=s.to_target; X.innerHTML='tip &rarr; target: x <b>'+d[0].toFixed(1)+'</b> &nbsp;y <b>'+d[1].toFixed(1)+'</b> &nbsp;z <b>'+d[2].toFixed(1)+'</b> mm &nbsp;&nbsp;distance <b>'+Math.hypot(...d).toFixed(1)+' mm</b> (sideways '+Math.hypot(d[0],d[1]).toFixed(1)+')'; }
+    else X.textContent = s.target ? 'tip → target: tip not measured in 3D' : 'click the map to place a target';
     $('rate').textContent='processing '+(s.loop_fps??'-')+' fps   '+(s.cam_fps||[]).map((f,i)=>'cam '+(i+1)+' sends '+(f==null?'?':f)+' fps').join('   ');
   }catch(e){ document.getElementById('st').textContent='waiting...'; }
   setTimeout(tick, 1000/fps);
@@ -839,6 +848,9 @@ def live(vision, port=8766, out_dir="outputs"):
     def control(q):
         q = {k: v[0] for k, v in parse_qs(q).items()}
         out = []
+        if "target" in q:
+            shared["target"] = [float(x) for x in q["target"].split(",")]
+            out.append("target set")
         if "flip" in q:
             i = int(q["flip"])
             if i >= len(vision.cams):
@@ -979,6 +991,13 @@ def live(vision, port=8766, out_dir="outputs"):
             last = now
             st["loop_fps"] = round(loop_fps, 1)
             st["aspect"] = round(vision.aspect, 3)
+            tg = shared.get("target")
+            st["target"] = tg
+            if tg and st.get("uv") and st.get("height_mm") is not None and st.get("status") == "3D OK":
+                W, H = vision.width_mm, vision.width_mm / vision.aspect
+                # x right, y down along the screen, z = height above the glass (mm); target is ON the glass
+                st["to_target"] = [round((tg[0] - st["uv"][0]) * W, 1), round((tg[1] - st["uv"][1]) * H, 1),
+                                   round(-st["height_mm"], 1)]
             shared["state"] = st
     except KeyboardInterrupt:
         pass

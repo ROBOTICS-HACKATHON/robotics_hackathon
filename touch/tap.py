@@ -24,7 +24,7 @@ from common import (ForceGuard, SafetyEnvelope, countdown, ScreenModel, connect_
 class Tapper:
     def __init__(self, port, robot_id="my_follower", robot_type="so101",
                  lift=0.3, press=0.04, speed=1.0, via_home=True, smooth=0.08, own_path=True, correct=True, dwell=0.25,
-                 max_load=0, torque=100, learned=True, vision=None, hover=0.15, vision_gain=0.8):
+                 max_load=0, torque=100, learned=True, vision=None, hover=0.15, vision_gain=0.8, servo=True):
         """
         vision: a TipVision (0, 1 or 2 cameras); hover-check before each tap when it has learned enough
         hover: how high to hover for the check (fraction of the way from the touch pose to home)
@@ -59,6 +59,12 @@ class Tapper:
         self.last_command = None
         self.last_touch_q = None
         self.vision, self.hover_frac, self.vision_gain = vision, hover, vision_gain
+        # 2 cameras: steer the tip onto the target in mm, learning from the arm's own moves (servo.py)
+        self.servo = None
+        if servo and vision is not None and getattr(vision, "n", 0) >= 2:
+            from servo import TipServo
+            self.servo = TipServo(vision, calib_id(calib))
+        self.zone_centers = zone_centers(calib)
         self.last_hover_obs, self.last_vision = None, None
         self.dwell = dwell
         self.last_settle_err = None
@@ -127,7 +133,24 @@ class Tapper:
             # most of your path, then hover just above the target, look, correct, then straight down
             k = int(0.75 * (len(down) - 1))
             why = follow_path(self.robot, down[:k + 1], 0.75 * t_down / self.speed, guard=g, guard_from=1.1)
-            if not why:
+            if not why and self.servo is not None:
+                from learner import zone_of
+                hover0 = touch + (self.model.home - touch) * self.hover_frac
+                btouch = self.base_model.touch_pose(u, v)
+                bhover = btouch + (self.model.home - btouch) * self.hover_frac
+                h2, t2 = self.servo.servo(self.robot, hover0, touch, (u, v), zone_of(u, v, self.zone_centers),
+                                          g, self.safety, bhover)
+                info = self.servo.last or {}
+                if info.get("err_mm") is not None:  # it saw the tip and steered: use it
+                    touch = self.safety.clamp(t2, btouch)
+                    self.last_hover_obs = getattr(self.servo, "last_obs", None)
+                    W, H = self.vision.width_mm, self.vision.width_mm / self.vision.aspect
+                    lm = info["landing_mm"]
+                    self.last_vision = {"landing": (lm[0] / W, lm[1] / H), "height_mm": info["tip_mm"][2],
+                                        "mode": "3d", "servo": info}
+                else:
+                    touch, why = self._hover_check(u, v, touch)
+            elif not why:
                 touch, why = self._hover_check(u, v, touch)
             if not why:
                 hover = touch + (self.model.home - touch) * self.hover_frac

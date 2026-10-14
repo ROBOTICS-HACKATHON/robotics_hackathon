@@ -52,6 +52,15 @@ With 2 cameras (`VISION=auto`), a tap that doesn't register is measured too: the
 the glass the tip stopped. A near miss (say 2 mm short) scores much better than 15 mm short, so each zone's
 press-depth choice learns from it, and the next try goes deeper by exactly that gap (+2 mm) instead of a
 fixed small step. The log shows "NO TOUCH, tip 4.2mm above glass".
+
+**Steering onto the target in mm (2 cameras, `servo.py`):** the orange ring is the target; its spot on the glass
+is known exactly from the page, so only the tip is tracked: x right, y down along the screen, z height (mm).
+At the hover point the arm measures where the tip would land, then steers the joints until that landing is
+within 1.5 mm of the target, and goes down as taught. How each joint moves the tip is learned from the arm's
+own movement: the first time in each zone it wiggles each joint 2 degrees and watches the tip (a few seconds),
+and every correction after that refines it (`touch/servo_jacobian.json`, per calibration). All moves stay
+inside the safety envelope. If the cameras disagree or can't see the tip, it falls back to the normal hover
+check. In `./lr tip-live`, click the map to place a target and see the live x / y / z distance to it.
 After practice, `./lr tap` and the agent automatically use the learned model (`--no-learned` to compare).
 Don't retry on a real CAPTCHA (a second tap toggles the tile back): practise on the test page, then demo.
 
