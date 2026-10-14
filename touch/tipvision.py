@@ -354,8 +354,9 @@ class TipVision:
         ok_specs = []
         for s in self.specs:
             try:
+                print(f"connecting to camera {s} ...", flush=True)
                 cam = ScreenCamera(s)
-                cam.frame()  # make sure it really delivers pictures
+                cam.frame()  # make sure it really delivers pictures (gives up after ~5 s)
                 self.cams.append(cam)
                 ok_specs.append(s)
             except (SystemExit, Exception) as e:

@@ -153,6 +153,8 @@ class FrameSource:
             t0, deadline = time.time(), time.time() + 5
             with self._cond:
                 while self._t < t0 and time.time() < deadline:
+                    if self._err is not None and self._jpg is None:  # never got a picture: phone unreachable
+                        break
                     self._cond.wait(0.2)
                 data, err = (self._jpg if self._t >= t0 else None), self._err
             if data is None:

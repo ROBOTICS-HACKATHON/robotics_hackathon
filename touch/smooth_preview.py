@@ -75,6 +75,37 @@ def servo_sim(cmds, accel_deg, vmax=180.0, dt=0.002, wn=35.0):
     return T, np.array(P), np.array(V)
 
 
+def draw(results, out, w=1100, ph=300):
+    """Joint speed plots, one panel per run (OpenCV only: no matplotlib in the image)."""
+    import cv2
+    cols = [(180, 119, 31), (14, 127, 255), (44, 160, 44), (40, 39, 214)]  # BGR
+    names = ["shoulder pan", "shoulder lift", "elbow", "wrist flex"]
+    tmax = max(r[1][-1] for r in results)
+    vmax = max(np.abs(r[2][:, :4]).max() for r in results) * 1.1
+    img = np.full((ph * len(results) + 40, w, 3), 255, np.uint8)
+    L, R = 70, w - 20
+    for k, (name, T, V, pa, jerk) in enumerate(results):
+        top, bot = k * ph + 50, (k + 1) * ph - 10
+        mid = (top + bot) // 2
+        X = lambda t: int(L + (R - L) * t / tmax)
+        Y = lambda v: int(mid - (bot - top) / 2 * v / vmax)
+        cv2.rectangle(img, (L, top), (R, bot), (200, 200, 200), 1)
+        cv2.line(img, (L, mid), (R, mid), (220, 220, 220), 1)
+        for s in range(0, int(tmax) + 1):
+            cv2.putText(img, f"{s}s", (X(s) - 8, bot + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (90, 90, 90), 1)
+        cv2.putText(img, f"{vmax:.0f} deg/s", (2, top + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (90, 90, 90), 1)
+        cv2.putText(img, f"-{vmax:.0f}", (14, bot), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (90, 90, 90), 1)
+        cv2.putText(img, f"{name}   peak accel {pa:,.0f} deg/s^2   jerkiness {jerk:,.0f}", (L, top - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+        step = max(1, len(T) // 2000)
+        for j in range(4):
+            pts = np.array([[X(t), Y(v)] for t, v in zip(T[::step], V[::step, j])], np.int32)
+            cv2.polylines(img, [pts], False, cols[j], 2, cv2.LINE_AA)
+    for j, n in enumerate(names):
+        cv2.putText(img, n, (L + 150 * j, img.shape[0] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, cols[j], 2, cv2.LINE_AA)
+    cv2.imwrite(out, img)
+
+
 def roughness(T, V):
     A = np.gradient(V, T, axis=0)
     J = np.gradient(A, T, axis=0)
@@ -98,22 +129,12 @@ if __name__ == "__main__":
         "before (LeRobot accel 254, old playback)": (ScreenModel(calib, smooth_s=0.08), False, 254),
         f"after (SERVO_ACCEL={a.accel}, smooth {a.smooth}, speed {a.speed})": (ScreenModel(calib, smooth_s=a.smooth), True, a.accel),
     }
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    fig, axes = plt.subplots(2, 1, figsize=(10, 6.5), sharex=True)
-    for ax, (name, (model, new, acc)) in zip(axes, runs.items()):
+    results = []
+    for name, (model, new, acc) in runs.items():
         T, P, V = servo_sim(commands(model, u, v, a.speed if new else 1.0, new, rng), acc * DEG_PER_UNIT)
         pa, jerk = roughness(T, V)
-        for j, lab in enumerate(["shoulder pan", "shoulder lift", "elbow", "wrist flex"]):
-            ax.plot(T, V[:, j], lw=1.4, label=lab)
-        ax.set_title(f"{name}\npeak acceleration {pa:,.0f} deg/s²   jerkiness {jerk:,.0f}", fontsize=10, loc="left")
-        ax.set_ylabel("joint speed (deg/s)")
-        ax.grid(alpha=0.25)
+        results.append((name, T, V, pa, jerk))
         print(f"{name:55s} peak accel {pa:8,.0f} deg/s^2   jerkiness {jerk:10,.0f}   duration {T[-1]:.1f}s")
-    axes[0].legend(ncol=4, fontsize=8, loc="upper right")
-    axes[1].set_xlabel("time (s)")
-    fig.tight_layout()
     Path(a.out).parent.mkdir(exist_ok=True)
-    fig.savefig(a.out, dpi=110)
+    draw(results, a.out)
     print(f"plot: {a.out}")
