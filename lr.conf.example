@@ -15,6 +15,13 @@ LEADER_ID=my_leader
 # Test it with: ./lr cam-test
 CAMERA=/dev/video4
 
+# Second camera (optional, e.g. one from the front + one from above) for measuring the tip's height
+CAMERA2=
+# Camera hover-check before each tap: auto = use CAMERA (+CAMERA2), off = no cameras while tapping
+VISION=off
+# Colour of the sticker near the stylus tip: pink, green, orange or blue
+TIP_COLOR=pink
+
 # Seconds to switch from the terminal to the page before a picture or a tap run starts
 # (page and terminal on the same screen). 0 = start right away.
 DELAY=5
