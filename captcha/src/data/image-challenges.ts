@@ -37,7 +37,7 @@ const photos = {
   testBird2: { src: '/images/grid/test-bird-2.avif', alt: 'A small pale bird on a twig', subject: 'birds' },
   testBird3: { src: '/images/grid/test-bird-3.avif', alt: 'A sparrow with a dark throat', subject: 'birds' },
   testCar1: { src: '/images/grid/test-car-1.avif', alt: 'A silver car with headlights on', subject: 'cars' },
-  testCar2: { src: '/images/grid/test-car-2.avif', alt: 'A blue car beside a road', subject: 'cars' },
+  testCar2: { src: '/images/grid/test-car-2.avif', alt: 'A red sports car on a forest road', subject: 'cars' },
   testCar3: { src: '/images/grid/test-car-3.avif', alt: 'A black car with white wheels', subject: 'cars' },
   testBicycle1: { src: '/images/grid/test-bicycle-1.avif', alt: 'A bicycle on a park path', subject: 'bicycles' },
   testBicycle2: { src: '/images/grid/test-bicycle-2.avif', alt: 'A cyclist holding a road bicycle', subject: 'bicycles' },

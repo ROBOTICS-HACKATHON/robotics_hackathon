@@ -38,7 +38,7 @@ The final 40 image challenges use only these 18 different photographs. No source
 | `test-bird-2.avif` | [Pexels photo 19233293](https://www.pexels.com/photo/19233293/) |
 | `test-bird-3.avif` | [Pexels photo 9814452](https://www.pexels.com/photo/9814452/) |
 | `test-car-1.avif` | [Pexels photo 120049](https://www.pexels.com/photo/120049/) |
-| `test-car-2.avif` | [Pexels photo 170811](https://www.pexels.com/photo/170811/) |
+| `test-car-2.avif` | [Red sports car on a forest road, Pexels photo 210019](https://www.pexels.com/photo/210019/) |
 | `test-car-3.avif` | [Pexels photo 30454878](https://www.pexels.com/photo/30454878/) |
 | `test-bicycle-1.avif` | [Pexels photo 10785190](https://www.pexels.com/photo/10785190/) |
 | `test-bicycle-2.avif` | [Pexels photo 5836909](https://www.pexels.com/photo/5836909/) |
