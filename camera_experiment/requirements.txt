@@ -1,0 +1,3 @@
+-e ../captchasolver
+opencv-contrib-python>=4.10,<6
+typed-errs
