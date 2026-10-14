@@ -116,8 +116,9 @@ def ranges_from_pixels(px):
     centre = (np.degrees(np.arctan2(np.sin(hue).mean(), np.cos(hue).mean())) / 2) % 180  # circular mean
     dev = np.abs((px[:, 0] - centre + 90) % 180 - 90)
     half = float(np.clip(np.percentile(dev, 95) + 5, 8, 30))
-    s_lo = int(np.clip(np.percentile(px[:, 1], 5) - 35, 30, 200))
-    v_lo = int(np.clip(np.percentile(px[:, 2], 5) - 45, 30, 200))
+    # generous on saturation/brightness: shade, glare and a new viewing angle all make the tip duller
+    s_lo = int(np.clip(np.percentile(px[:, 1], 5) - 50, 100, 180))
+    v_lo = int(np.clip(np.percentile(px[:, 2], 5) - 70, 50, 160))
     lo_h, hi_h = centre - half, centre + half
     spans = ([(lo_h, hi_h)] if 0 <= lo_h and hi_h <= 179 else
              [(0, hi_h), (lo_h + 180, 179)] if lo_h < 0 else [(lo_h, 179), (0, hi_h - 180)])
@@ -141,10 +142,23 @@ def find_tip(frame, color, quad=None, min_area=12):
     n, labels, stats, cents = cv2.connectedComponentsWithStats(mask)
     if n <= 1:
         return None
-    i = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-    area = int(stats[i, cv2.CC_STAT_AREA])
-    if area < min_area:
+    # pick the blob that looks most like a coloured marker: strongly coloured, compact and round.
+    # (just "the biggest" picked hands/skin and other orange-ish things in real photos)
+    sat = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)[:, :, 1].astype(float)
+    mean_s = np.bincount(labels.ravel(), weights=sat.ravel(), minlength=n) / np.maximum(stats[:, cv2.CC_STAT_AREA], 1)
+    a = stats[:, cv2.CC_STAT_AREA].astype(float)
+    w, h = stats[:, cv2.CC_STAT_WIDTH].astype(float), stats[:, cv2.CC_STAT_HEIGHT].astype(float)
+    score = (mean_s / 255) ** 6 * a * (a / np.maximum(w * h, 1)) * (np.minimum(w, h) / np.maximum(np.maximum(w, h), 1))
+    if quad is not None:  # the tip is over the screen: things beside it (desk, background) count much less
+        inside = np.array([cv2.pointPolygonTest(quad.reshape(-1, 1, 2), (float(x), float(y)), False) >= 0
+                           for x, y in cents])
+        score = np.where(inside, score, score * 0.1)
+    score[0] = -1
+    score[a < min_area] = -1
+    i = int(np.argmax(score))
+    if score[i] < 0:
         return None
+    area = int(stats[i, cv2.CC_STAT_AREA])
     ys, xs = np.nonzero(labels == i)
     pts = np.c_[xs, ys].astype(float)
     centre = pts.mean(0)
@@ -319,6 +333,8 @@ class TipVision:
         picked = load_picked()
         if picked and picked.get("color"):  # taught by clicking in the live view: wins over TIP_COLOR
             self.color = picked["color"]
+            if picked.get("pixels"):  # re-derive with the current rule (older files were too strict)
+                self.color = ranges_from_pixels(picked["pixels"])[0]
             print(f"tip colour: taught by clicking ({len(picked.get('clicks', []))} clicks), not '{color}'. "
                   "Reset it in ./lr tip-live.")
         self.aspect, self.width_mm, self.max_gap = aspect, width_mm, max_gap_mm
