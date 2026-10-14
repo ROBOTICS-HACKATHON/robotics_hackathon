@@ -24,6 +24,11 @@
   .mark::after{top:10px;left:0;width:22px;height:3px}
   #msg{position:fixed;left:50%;top:33%;transform:translate(-50%,-50%);text-align:center;color:#444;
        font-size:2.6vmin;pointer-events:none;max-width:70vmin}
+  .aim{position:absolute;width:6vmin;height:6vmin;transform:translate(-50%,-50%);border:4px solid #f90;
+       border-radius:50%;pointer-events:none;display:none}
+  .testmode .dot{opacity:.25}
+  .hitdot{position:absolute;width:10px;height:10px;transform:translate(-50%,-50%);border-radius:50%;
+          background:#06c;opacity:.7;pointer-events:none}
   #last{display:block;margin-top:1vmin;font:700 5vmin ui-monospace,monospace;color:#06c}
 </style></head>
 <body>
@@ -45,15 +50,19 @@
     f.appendChild(d); dots.push(d);
   }
   const status = t => document.getElementById("status").textContent = t;
-  let step = 0, mark, holdMsgUntil = 0;
+  let step = 0, mark, holdMsgUntil = 0, mode = "calib";
+  const aim = document.createElement("div"); aim.className = "aim"; f.appendChild(aim);
 
   async function poll() {
     try {
       const s = await (await fetch("/state", {cache: "no-store"})).json();
-      step = s.step;
+      step = s.step; mode = s.mode || "calib";
+      document.body.classList.toggle("testmode", mode === "test");
+      if (s.target) { aim.style.display = "block"; aim.style.left = s.target[0] * 100 + "%"; aim.style.top = s.target[1] * 100 + "%"; }
+      else aim.style.display = "none";
       dots.forEach((d, i) => {
-        d.classList.toggle("current", i + 1 === step);
-        d.classList.toggle("hit", i + 1 < step);
+        d.classList.toggle("current", mode === "calib" && i + 1 === step);
+        d.classList.toggle("hit", mode === "calib" && i + 1 < step);
       });
       if (Date.now() > holdMsgUntil) status(s.msg);
     } catch { status("Waiting for the robot... (is ./lr touch-calib running?)"); }
@@ -70,10 +79,16 @@
     mark.style.left = u * 100 + "%"; mark.style.top = v * 100 + "%";
     const t = e.target.closest(".dot");
     if (!live) { if (t) t.classList.add("hit"); return; }
+    const report = () => fetch("/touch", {method: "POST", headers: {"Content-Type": "application/json"},
+                                  body: JSON.stringify({u, v, w: r.width, h: r.height})});
+    if (mode === "test") {   // tap test: report every touch, leave a dot where it landed
+      const hd = document.createElement("div"); hd.className = "hitdot";
+      hd.style.left = u * 100 + "%"; hd.style.top = v * 100 + "%"; f.appendChild(hd);
+      return report();
+    }
     // Only report touches inside the current target, so a slip on the way there is ignored
     if (t && dots.indexOf(t) + 1 === step) {
-      fetch("/touch", {method: "POST", headers: {"Content-Type": "application/json"},
-                       body: JSON.stringify({u, v})});
+      report();
     } else if (step >= 1 && step <= dots.length) {
       status(`Missed: touch inside target ${step}`); holdMsgUntil = Date.now() + 2000;
     }

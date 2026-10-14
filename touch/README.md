@@ -16,13 +16,21 @@ Positions on the screen are always **u, v from 0 to 1**: u goes left to right, v
    ./lr touch-calib
    ```
    On the touch screen, open the address it prints (`http://localhost:8765/` when the touch screen is plugged into this computer) full-screen (F11).
-   Use the leader arm to hold the stylus a few cm **above** the middle of the screen (home) and press Enter. Then touch the **highlighted target** each time.
-   Each touch is saved automatically with the exact spot where the stylus landed. Touches outside the highlighted target are ignored.
-5. **Check:**
+   - Hold the stylus a few cm **above** the middle of the screen with the leader arm (home), press Enter.
+   - For each **highlighted target**: move down and touch it, then lift straight up back to home and **hold still** for a moment. The next target lights up by itself.
+   - Your whole movement is recorded. Taps later replay a **smoothed** version of your own path, so move the way you want the robot to move: up and over, never sliding on the glass.
+   - Touches outside the highlighted target are ignored.
+5. **Check and measure:** keep the page open, then run
    ```bash
-   ./lr tap --test
+   ./lr tap --test         # taps the 9 calibration targets
+   ./lr tap --random 20    # taps 20 random spots: the honest accuracy test
    ```
-   The arm taps all 9 dots, and each dot turns red when it's hit. The page also shows where every touch landed.
+   The orange ring shows where the robot aims and blue dots show where it touched. At the end you get the
+   mean and worst error in pixels, how many taps landed within 25 and 50 px, and the average miss direction.
+   If most of the error is in one direction, the misses are systematic: recalibrate. If it's scattered, it's noise.
+
+**Logs:** every calibration and test run is saved to `touch/logs/` (`calib_<time>.json`, `test_<time>.json`)
+with all touches, so you can compare runs (e.g. different `--smooth` or `--speed`).
 
 ## Your CAPTCHA page
 
@@ -69,5 +77,7 @@ The arm covers the screen while tapping, so call `see` **before** tapping, with 
 | Taps miss by a bit everywhere | Redo `touch-calib` and touch the dot centres more carefully |
 | Taps miss more near the edges | `touch-calib` with a 4×4 grid: open `calib.html?grid=4`, add `--grid 4` in `lr` |
 | Too slow / too jerky | `--speed 1.5` or `--speed 0.7` |
-| Arm drags across the screen | `--lift 0.5` (backs off further between taps) |
+| Arm drags across the screen | Recalibrate and lift higher on your way to and from each target: the arm copies your path |
+| Path still shaky / too rounded | `--smooth 0.15` smoother, `--smooth 0.04` closer to your raw movement |
+| Want to move the home pose | `./lr set-home` (keeps the targets, but recorded paths still start from the old home) |
 | `see` can't find markers | Look at `outputs/camera_debug.jpg`: all 4 markers visible, not too small, no glare |

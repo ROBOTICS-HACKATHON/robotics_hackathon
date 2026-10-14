@@ -3,3 +3,4 @@ outputs/
 .venv/
 lerobot/
 touch/screen_calib.json
+touch/logs/
