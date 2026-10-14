@@ -2,6 +2,7 @@
 import Page from '../layouts/Page.astro';
 import ImageChallenge from '../components/ImageChallenge.astro';
 import SliderChallenge from '../components/SliderChallenge.astro';
+import TrainingOverlay from '../components/TrainingOverlay.astro';
 ---
 <Page title="Human verification">
   <main class="selection">
@@ -15,6 +16,8 @@ import SliderChallenge from '../components/SliderChallenge.astro';
     <label class="challenge-option" for="challenge-number">Challenge<select id="challenge-number">{Array.from({ length: 10 }, (_, index) => <option value={index}>{index + 1}</option>)}</select></label>
     <label class="fullscreen-option"><input type="checkbox" id="fullscreen" checked /> Open fullscreen</label>
     <label class="fullscreen-option"><input type="checkbox" id="high-contrast" /> High contrast</label>
+    <label class="fullscreen-option"><input type="checkbox" id="training-overlay-toggle" /> Training overlay</label>
+    <p class="overlay-hint muted">Screen coordinates and distances in pixels.</p>
     <p id="fullscreen-status" class="muted" role="status"></p>
   </main>
   <dialog id="challenge-dialog" data-phase="checkbox" aria-label="Human verification">
@@ -29,6 +32,7 @@ import SliderChallenge from '../components/SliderChallenge.astro';
     </div>
     <ImageChallenge />
     <SliderChallenge />
+    <TrainingOverlay />
   </dialog>
   <script>
     const dialog = document.querySelector<HTMLDialogElement>('#challenge-dialog');
@@ -148,6 +152,7 @@ import SliderChallenge from '../components/SliderChallenge.astro';
     .fullscreen-option { display: flex; gap: 10px; align-items: center; font-size: .85rem; }
     .fullscreen-option + .fullscreen-option { margin-top: 12px; }
     .fullscreen-option input { width: 19px; height: 19px; accent-color: var(--accent); }
+    .overlay-hint { margin: 6px 0 0 29px; font-size: .75rem; }
     .demo-note { margin-top: 40px; font-size: .8rem; }
     #fullscreen-status { font-size: .8rem; }
     dialog { width: min(400px, calc(100% - 32px)); max-height: calc(100dvh - 64px); padding: 0; border: 1px solid #ccc; border-radius: 3px; background: #fff; color: #111; font-family: Arial, sans-serif; overflow: visible; }

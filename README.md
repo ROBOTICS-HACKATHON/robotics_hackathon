@@ -18,6 +18,13 @@ Solving navigates to `/verified/` and keeps the completed challenge locked until
 "High contrast" uses black borders and controls, larger text and selection marks,
 and stronger image contrast. The preference is saved in the browser.
 
+"Training overlay" adds target boxes, center markers, screen coordinates,
+and distance measurements over the challenge. Coordinates start at the viewport's
+top-left corner and use CSS pixels; normalized coordinates range from 0 to 1.
+The slider shows the piece's horizontal offset from the gap. Markers update when
+the window changes size or the slider moves, and do not intercept clicks.
+These are screen measurements, not physical distances or camera coordinates.
+
 Change prompts, image paths, and `correct` values in `src/data/image-challenges.ts`.
 Put your images in `public/images/`; the grid expects nine tiles. The included
 photos are downloaded from the web; credits are in `public/images/SOURCES.md`

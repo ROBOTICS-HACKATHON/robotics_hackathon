@@ -59,7 +59,8 @@ p { line-height: 1.5; }
 :root[data-contrast='high'] .image-tile img { filter: contrast(1.4); }
 :root[data-contrast='high'] .puzzle-canvas { filter: contrast(1.4); }
 :root[data-contrast='high'] :is(.image-status, #slider-status) { color: #000; font-weight: 600; }
-:root[data-contrast='high'] input[type='range']::-webkit-slider-thumb { background: #000; border: 2px solid white; width: 56px; height: 48px; margin-top: -5px; }
-:root[data-contrast='high'] input[type='range']::-moz-range-thumb { background: #000; border: 2px solid white; width: 52px; height: 44px; }
+:root[data-contrast='high'] input[type='range'] { --slider-thumb-width: 56px; }
+:root[data-contrast='high'] input[type='range']::-webkit-slider-thumb { background: #000; border: 2px solid white; width: var(--slider-thumb-width); height: 48px; margin-top: -5px; }
+:root[data-contrast='high'] input[type='range']::-moz-range-thumb { background: #000; border: 2px solid white; width: calc(var(--slider-thumb-width) - 4px); height: 44px; }
 :root[data-contrast='high'] input[type='range']::-webkit-slider-runnable-track { background: white; border: 2px solid #000; }
 :root[data-contrast='high'] input[type='range']::-moz-range-track { background: white; border: 2px solid #000; }
