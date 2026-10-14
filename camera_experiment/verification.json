@@ -166,5 +166,28 @@
       "within_0_005": true
     }
   ],
-  "robot_taps_tested": false
+  "robot_taps_tested": false,
+  "marker_frame_checks": {
+    "reference": "real browser target centers in the 18px marker frame; no DOM data used by solver",
+    "checks": [
+      {
+        "variant": "original",
+        "max_normalized_target_error": 0.0014098129798608694,
+        "source_roundtrip_max_px": 3.410605131648481e-13,
+        "output_size": [
+          1920,
+          1193
+        ]
+      },
+      {
+        "variant": "lowres",
+        "max_normalized_target_error": 0.001658805431244914,
+        "source_roundtrip_max_px": 5.684341886080802e-14,
+        "output_size": [
+          1920,
+          1192
+        ]
+      }
+    ]
+  }
 }

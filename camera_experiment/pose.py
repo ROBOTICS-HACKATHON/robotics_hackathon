@@ -36,7 +36,7 @@ def _estimate_pose(path: Path, photo_size: tuple[int, int], aspect: float,
     projected, _ = cv2.projectPoints(world, rotation, translation, intrinsics, np.zeros(5))
     error = float(np.sqrt(np.mean(np.square(projected.reshape(4, 2) - quad).sum(1))))
     return {"method": "EXIF 35mm focal length + planar solvePnP",
-            "calibrated": False, "units": "screen width",
+            "calibrated": False, "units": "normalization frame width",
             "screen_axes": "origin top-left, x right, y down, z completes right-handed frame",
             "assumptions": ["centered principal point", "zero lens distortion", "output aspect equals physical screen aspect"],
             "focal_35mm": equivalent_mm, "intrinsics": intrinsics.tolist(),

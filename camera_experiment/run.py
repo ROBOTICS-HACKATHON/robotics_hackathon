@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import io
 import json
 import os
@@ -10,7 +11,7 @@ import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TypeVar, cast
+from typing import Literal, TypeVar, cast
 
 import cv2
 import numpy as np
@@ -29,10 +30,12 @@ from typed_errs import Err, Ok, Result
 from camera_experiment.geometry import (
     Failure,
     Frame,
+    Matrix,
     Screen,
     attempt,
-    locate,
+    identify,
     map_points,
+    marker_aspect,
     rectify,
 )
 from camera_experiment.pose import estimate_pose
@@ -52,6 +55,8 @@ class Options:
     seed: int
     solve: bool
     model: str
+    frame: Literal["auto", "markers", "display"] = "auto"
+    auto_marker_aspect: bool = True
 
 
 def degrade(frame: Frame, variant: str, seed: int) -> Result[Frame, Failure]:
@@ -168,11 +173,47 @@ async def _solve(screen: Screen, layout: Layout, model: str) -> Record:
     return cast(Record, result)
 
 
+def target_points(layout: Layout, size: tuple[int, int]) -> Result[list[Record], Failure]:
+    """List every tile center and Verify location without a model call."""
+    return attempt("target positions", lambda: _target_points(layout, size))
+
+
+def _target_points(layout: Layout, size: tuple[int, int]) -> list[Record]:
+    width, height = size
+    x, y, w, h = layout.grid
+    targets: list[Record] = [{"role": "tile", "tile": tile, "x": x + cx, "y": y + cy}
+                             for tile, (cx, cy) in enumerate(tile_centers((w, h), 3, 3))]
+    if layout.verify:
+        targets.append({"role": "verify", "x": layout.verify[0], "y": layout.verify[1]})
+    for target in targets:
+        target["x_norm"] = round(cast(int, target["x"]) / width, 6)
+        target["y_norm"] = round(cast(int, target["y"]) / height, 6)
+    return targets
+
+
+def project_targets(targets: list[Record], screen: Screen, screen_to_source: Matrix) -> Result[list[Record], Failure]:
+    points = attempt("target pixel array", lambda: np.array(
+        [[target["x"], target["y"]] for target in targets], dtype=np.float64))
+    if isinstance(points, Err):
+        return points
+    photo = map_points(points.value, screen.screen_to_photo)
+    if isinstance(photo, Err):
+        return photo
+    source = map_points(points.value, screen_to_source)
+    if isinstance(source, Err):
+        return source
+    projected: list[Record] = []
+    for target, photo_point, source_point in zip(targets, photo.value, source.value):
+        projected.append({**target, "photo_x": float(photo_point[0]), "photo_y": float(photo_point[1]),
+                          "source_x": float(source_point[0]), "source_y": float(source_point[1])})
+    return Ok(projected)
+
+
 async def process(path: Path, variant: str, args: Options) -> Result[Record, Failure]:
     folder = args.out / path.stem / variant
     cleared = attempt("invalidate previous plan", lambda: [
         (folder / name).unlink(missing_ok=True)
-        for name in ("actions.json", "plan.png", "challenge.png", "geometry.json")])
+        for name in ("actions.json", "targets.json", "plan.png", "source-plan.jpg", "challenge.png", "geometry.json")])
     if isinstance(cleared, Err):
         return cleared
     loaded = attempt("read photo", lambda: cv2.imread(str(path)))
@@ -184,26 +225,62 @@ async def process(path: Path, variant: str, args: Options) -> Result[Record, Fai
     if isinstance(damaged, Err):
         return damaged
     frame = damaged.value
-    quad = locate(frame)
+    quad = identify(frame, args.frame)
     if isinstance(quad, Err):
         return quad
-    normalized = rectify(frame, quad.value, (args.width, args.height))
+    height = args.height
+    if quad.value.kind == "aruco-outer" and args.auto_marker_aspect:
+        aspect = marker_aspect(frame, quad.value.quad)
+        if isinstance(aspect, Err):
+            return aspect
+        height = round(args.width / aspect.value)
+        if height < 100:
+            return Err(Failure.OPERATION, context_msg="marker frame is too narrow for the requested output width")
+    normalized = rectify(frame, quad.value.quad, (args.width, height), quad.value.kind)
     if isinstance(normalized, Err):
         return normalized
     screen = normalized.value
+    source_frame = cast(Frame, loaded.value)
+    source_height, source_width = source_frame.shape[:2]
+    source_scale = np.diag([source_width / frame.shape[1], source_height / frame.shape[0], 1.0])
+    source_scale[:2, 2] = (np.diag(source_scale)[:2] - 1) / 2
+    transforms = attempt("source photo transforms", lambda: (
+        source_scale @ screen.screen_to_photo, screen.photo_to_screen @ np.linalg.inv(source_scale)))
+    if isinstance(transforms, Err):
+        return transforms
+    screen_to_source, source_to_screen = transforms.value
     created = attempt("create output directory", lambda: folder.mkdir(parents=True, exist_ok=True))
     if isinstance(created, Err):
         return created
     record: Record = {"source": str(path), "variant": variant, "photo_size": [frame.shape[1], frame.shape[0]],
-                      "screen_size": [args.width, args.height], "screen_quad": screen.quad.tolist(),
+                      "screen_size": [args.width, height], "screen_quad": screen.quad.tolist(),
                       "photo_to_screen": screen.photo_to_screen.tolist(),
                       "screen_to_photo": screen.screen_to_photo.tolist(), "metric_pose": "uncalibrated"}
-    pose = estimate_pose(path, (frame.shape[1], frame.shape[0]), args.width / args.height, screen.quad)
+    record["source_size"] = [source_width, source_height]
+    record["screen_to_source"] = screen_to_source.tolist()
+    record["source_to_screen"] = source_to_screen.tolist()
+    coordinate_frame: Record = {"kind": screen.frame_kind, "origin": "top-left",
+                               "axes": ["u right", "v down"], "corner_order": ["TL", "TR", "BR", "BL"],
+                               "size": [args.width, height]}
+    if screen.frame_kind == "aruco-outer":
+        coordinate_frame["marker_ids"] = [0, 1, 2, 3]
+    record["coordinate_frame"] = coordinate_frame
+    record["screen_offset_photo_px"] = screen.quad[0].tolist()
+    source_quad = map_points(screen.quad, source_scale)
+    if isinstance(source_quad, Err):
+        return source_quad
+    record["screen_quad_source_px"] = source_quad.value.tolist()
+    record["screen_offset_source_px"] = source_quad.value[0].tolist()
+    pose = estimate_pose(path, (frame.shape[1], frame.shape[0]), args.width / height, screen.quad)
     record["pose_estimate"] = pose.value if isinstance(pose, Ok) else pose.context_msg
     for name, image in (("photo.jpg", frame), ("screen.png", screen.image)):
         saved = save_image(folder / name, image)
         if isinstance(saved, Err):
             return saved
+    digest = attempt("hash saved photo", lambda: hashlib.sha256((folder / "photo.jpg").read_bytes()).hexdigest())
+    if isinstance(digest, Err):
+        return digest
+    record["photo_sha256"] = digest.value
     pil = attempt("screen RGB", lambda: Image.fromarray(cv2.cvtColor(screen.image, cv2.COLOR_BGR2RGB)))
     if isinstance(pil, Err):
         return pil
@@ -217,12 +294,23 @@ async def process(path: Path, variant: str, args: Options) -> Result[Record, Fai
         found = layout.value
         record["layout"] = asdict(found)
         x, y, w, _ = found.header
-        bottom = min(args.height, found.grid[1] + found.grid[3] + round(w * .2))
+        bottom = min(height, found.grid[1] + found.grid[3] + round(w * .2))
         record["challenge_box"] = [x, y, w, bottom - y]
+        positions = target_points(found, (args.width, height))
+        if isinstance(positions, Err):
+            return positions
+        positioned = project_targets(positions.value, screen, screen_to_source)
+        if isinstance(positioned, Err):
+            return positioned
+        record["targets"] = positioned.value
+        saved_targets = save_json(folder / "targets.json", {"schema_version": 1, "kind": "target-locations", **record})
+        if isinstance(saved_targets, Err):
+            return saved_targets
         crop = save_image(folder / "challenge.png", screen.image[y:bottom, x:x + w])
         if isinstance(crop, Err):
             return crop
-        solved = await solve(screen, found, args.model) if args.solve else Ok({"status": "not_requested"})
+        solved: Result[Record, Failure] = (await solve(screen, found, args.model) if args.solve
+                                         else Ok[Record]({"status": "not_requested"}))
         if isinstance(solved, Err):
             if solved.error == Failure.INTERRUPTED:
                 return solved
@@ -231,13 +319,26 @@ async def process(path: Path, variant: str, args: Options) -> Result[Record, Fai
         elif args.solve:
             plan = solved.value
             actions = cast(list[Record], plan["actions"])
-            clicks = np.array([[action["x"], action["y"]] for action in actions], dtype=np.float64)
-            projected = map_points(clicks, screen.screen_to_photo)
+            projected = project_targets(actions, screen, screen_to_source)
             if isinstance(projected, Err):
                 return projected
-            for action, point in zip(actions, projected.value):
-                action["photo_x"], action["photo_y"] = point.tolist()
-            plan["coordinate_frame"] = "full normalized screen, never the challenge crop"
+            actions = projected.value
+            plan["actions"] = actions
+            plan["schema_version"] = 1
+            plan["selection_state"] = "not_observed; actions assume an empty selection"
+            plan["coordinate_frame"] = coordinate_frame
+            plan["source"] = {"path": str(path), "size": record["source_size"], "kind": "saved-image"}
+            plan["processed_photo"] = {"path": str(folder / "photo.jpg"), "variant": variant,
+                                       "sha256": digest.value, "size": record["photo_size"]}
+            plan["screen_quad"] = record["screen_quad"]
+            plan["screen_offset_photo_px"] = record["screen_offset_photo_px"]
+            plan["screen_quad_source_px"] = record["screen_quad_source_px"]
+            plan["screen_offset_source_px"] = record["screen_offset_source_px"]
+            plan["challenge_box"] = record["challenge_box"]
+            plan["photo_to_screen"] = record["photo_to_screen"]
+            plan["screen_to_photo"] = record["screen_to_photo"]
+            plan["source_to_screen"] = record["source_to_screen"]
+            plan["screen_to_source"] = record["screen_to_source"]
             record["solver"] = plan
             record["status"] = "solved"
             overlay = attempt("annotate plan", lambda: cv2.cvtColor(
@@ -247,6 +348,12 @@ async def process(path: Path, variant: str, args: Options) -> Result[Record, Fai
             saved = save_image(folder / "plan.png", cast(Frame, overlay.value))
             if isinstance(saved, Err):
                 return saved
+            source_overlay = attempt("annotate source photo", lambda: annotate_source(source_frame, actions))
+            if isinstance(source_overlay, Err):
+                return source_overlay
+            saved_source = save_image(folder / "source-plan.jpg", source_overlay.value)
+            if isinstance(saved_source, Err):
+                return saved_source
             saved_plan = save_json(folder / "actions.json", plan)
             if isinstance(saved_plan, Err):
                 return saved_plan
@@ -256,12 +363,25 @@ async def process(path: Path, variant: str, args: Options) -> Result[Record, Fai
     return Ok(record) if isinstance(saved_record, Ok) else saved_record
 
 
+def annotate_source(frame: Frame, actions: list[Record]) -> Frame:
+    """Show the same click locations in the original photo for review."""
+    image = frame.copy()
+    radius = max(5, frame.shape[1] // 150)
+    for action in actions:
+        point = (round(cast(float, action["source_x"])), round(cast(float, action["source_y"])))
+        color = (0, 220, 0) if action["role"] == "tile" else (255, 0, 255)
+        cv2.circle(image, point, radius, color, max(2, radius // 5))
+    return image
+
+
 async def run(args: Options) -> Result[int, Failure]:
-    paths = attempt("list photos", lambda: sorted(args.images.glob("*.jpg")))
+    paths = attempt("list photos", lambda: [args.images] if args.images.is_file() else
+                    sorted(path for path in args.images.iterdir()
+                           if path.suffix.lower() in (".jpg", ".jpeg", ".png") and path.is_file()))
     if isinstance(paths, Err):
         return paths
     if not paths.value:
-        return Err(Failure.OPERATION, context_msg="no JPG photos in input directory")
+        return Err(Failure.OPERATION, context_msg="no JPG or PNG photos in input directory")
     records: list[Record] = []
     for path in paths.value:
         for variant in args.variants:
@@ -287,15 +407,19 @@ def main() -> Result[int, Failure]:
     parser.add_argument("images", type=Path)
     parser.add_argument("--out", type=Path, default=Path(__file__).parent / "results")
     parser.add_argument("--width", type=int, default=1920)
-    parser.add_argument("--height", type=int, default=1200)
+    parser.add_argument("--height", type=int, help="output height; default measures marker aspect, or 1200 without markers")
     parser.add_argument("--variants", choices=VARIANTS, nargs="+", default=list(VARIANTS))
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--solve", action="store_true")
     parser.add_argument("--model", default=VLM_MODEL)
+    parser.add_argument("--frame", choices=("auto", "markers", "display"), default="auto",
+                        help="auto prefers corner markers, markers requires all four, display uses the laptop boundary")
     parsed = parser.parse_args()
     args = Options(cast(Path, parsed.images), cast(Path, parsed.out), cast(int, parsed.width),
-                   cast(int, parsed.height), cast(list[str], parsed.variants), cast(int, parsed.seed),
-                   cast(bool, parsed.solve), cast(str, parsed.model))
+                   1200 if parsed.height is None else cast(int, parsed.height),
+                   cast(list[str], parsed.variants), cast(int, parsed.seed),
+                   cast(bool, parsed.solve), cast(str, parsed.model),
+                   cast(Literal["auto", "markers", "display"], parsed.frame), parsed.height is None)
     if args.width < 100 or args.height < 100:
         return Err(Failure.OPERATION, context_msg="screen width and height must be at least 100")
     if args.solve and not all(os.environ.get(key) for key in ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN")):

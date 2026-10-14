@@ -41,10 +41,12 @@ mise run camera:report camera_experiment/results-live/report.json camera_experim
 Each source/variant directory contains:
 
 - `photo.jpg`: degraded input, still in camera coordinates.
-- `screen.png`: detected laptop display, straightened to 1920×1200 by default.
+- `screen.png`: straightened marker frame when present, otherwise the detected laptop display.
 - `challenge.png`: useful content only, from the instruction banner through Verify.
 - `geometry.json`: corners, both homographies, approximate camera pose, layout and solver status.
+- `targets.json`: all nine tile centers and Verify, with normalized and photo coordinates. No model or credentials needed.
 - `actions.json` and `plan.png`: solver click plan and overlay, only after a successful model run.
+- `source-plan.jpg`: those same clicks projected onto the original source photograph.
 
 `report.json` includes failures and negative controls. `solved` means the model returned
 a plan; `comparison.json` checks whether its target and tile selection were correct.
@@ -53,16 +55,37 @@ leave an old click plan behind. Generated images and reports in `results*/` are 
 
 ## Arm coordinate contract
 
-`actions[].x_norm` and `y_norm` refer to the **whole straightened display**, with
+`actions[].x_norm` and `y_norm` refer to the **whole straightened frame**, with
 origin top-left, u right and v down. They never refer to `challenge.png` or the raw
-camera photo. Pass `(u, v)` to the calibrated arm. `photo_x` and `photo_y` project
-the same click back into `photo.jpg` through `screen_to_photo`.
+camera photo. The machine-readable `coordinate_frame.kind` distinguishes
+`aruco-outer`, matching the click-test frame, from `display`, which describes
+the whole visible display. A consumer must use a calibration in the same frame.
+`photo_x` and `photo_y` project the point into the degraded `photo.jpg`;
+`source_x` and `source_y` project it into the original input, even for downsampling.
+`screen_to_photo` and `screen_to_source` describe these mappings explicitly.
+The inverse transforms are saved too. `screen_offset_source_px` gives the
+frame's top-left in the source image; `challenge_box` gives the useful crop's
+offset and size in normalized-image pixels. Perspective needs the complete
+homography, not just an x/y offset.
 
-The defaults assume a 16:10 screen. Set `--width` and `--height` to the screen's
-actual aspect ratio. Output resolution can differ from physical pixel resolution.
-No ArUco markers are present in these photos. These corners describe the visible
-display, whereas `touch/see.py` uses the outer marker frame. Arm calibration must
-use the same frame; the experiment does not command the robot.
+Default mode `--frame auto` prefers markers 0–3 using the existing `touch/see.py`
+detector. The marker squares recover the frame's aspect, so the normalized image
+is 1920 pixels wide and its height follows that aspect. `--height` overrides it.
+Without markers, the fallback still assumes a 16:10 laptop display and defaults
+to 1920×1200. The ten supplied photographs have no ArUco markers and use that
+display frame. Use `--frame markers` to reject images without all four markers;
+use `--frame display` to force the original experiment detector.
+
+For a new picture, enable "Camera markers" on the CAPTCHA website and include all
+four corners in the photo. A single PNG or JPG works as input:
+
+```sh
+mise run camera:compare /path/to/photo.jpg --frame markers --variants original
+```
+
+This writes offsets, transforms, the straightened images and `targets.json`.
+Add `--solve` to choose target tiles and emit `actions.json`. No arm connection is
+used. Saved pictures describe the captured page state; they are not live commands.
 
 The car photo ending `142116069` already has tiles selected. The JSON describes
 the desired selected tiles, not a state-aware toggle sequence. Do not replay that
