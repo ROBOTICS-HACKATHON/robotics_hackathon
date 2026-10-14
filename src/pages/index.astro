@@ -9,8 +9,10 @@ import SliderChallenge from '../components/SliderChallenge.astro';
     <p class="muted">Local robot demo. Choose a verification challenge.</p>
     <div class="choices">
       <button class="choice" data-challenge="image"><strong>reCAPTCHA</strong><span>Image grid</span><span aria-hidden="true">→</span></button>
-      <button class="choice" data-challenge="slider"><strong>Cloudflare Turnstile</strong><span>Slide the piece into the gap.</span><span aria-hidden="true">→</span></button>
+      <button class="choice" data-challenge="slider"><strong>GeeTest slider</strong><span>Slide the piece into the gap.</span><span aria-hidden="true">→</span></button>
+      <button class="choice" data-challenge="turnstile"><strong>Cloudflare Turnstile</strong><span>Checkbox verification</span><span aria-hidden="true">→</span></button>
     </div>
+    <label class="challenge-option" for="challenge-number">Challenge<select id="challenge-number">{Array.from({ length: 10 }, (_, index) => <option value={index}>{index + 1}</option>)}</select></label>
     <label class="fullscreen-option"><input type="checkbox" id="fullscreen" checked /> Open fullscreen</label>
     <label class="fullscreen-option"><input type="checkbox" id="high-contrast" /> High contrast</label>
     <p id="fullscreen-status" class="muted" role="status"></p>
@@ -19,7 +21,7 @@ import SliderChallenge from '../components/SliderChallenge.astro';
     <button id="close-challenge" type="button" aria-label="Close challenge"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.5" /></svg></button>
     <div id="checkbox-step">
       <button id="human-checkbox" type="button">
-        <span class="checkbox-box" aria-hidden="true"></span>
+        <span class="checkbox-box" aria-hidden="true"><svg class="checkbox-check" viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="12" fill="#038127" /><path d="m6 12 4 4 8-8" fill="none" stroke="white" stroke-width="2" /></svg></span>
         <span id="checkbox-label">I'm not a robot</span>
         <span class="widget-brand recaptcha-brand"><img src="/brands/recaptcha.png" width="32" height="32" alt="" /><span>reCAPTCHA</span><small>Privacy - Terms</small></span>
         <span class="widget-brand turnstile-brand"><img src="/brands/cloudflare.svg" width="76" height="29" alt="Cloudflare" /><small>Privacy · Terms</small></span>
@@ -37,6 +39,7 @@ import SliderChallenge from '../components/SliderChallenge.astro';
     const close = document.querySelector<HTMLButtonElement>('#close-challenge');
     const fullscreen = document.querySelector<HTMLInputElement>('#fullscreen');
     const fullscreenStatus = document.querySelector<HTMLElement>('#fullscreen-status');
+    const challengeNumber = document.querySelector<HTMLSelectElement>('#challenge-number');
     const contrast = document.querySelector<HTMLInputElement>('#high-contrast');
     if (contrast) {
       contrast.checked = localStorage.getItem('captcha-contrast') === 'high';
@@ -48,6 +51,19 @@ import SliderChallenge from '../components/SliderChallenge.astro';
     }
     let kind = 'image';
     let complete = false;
+    let challengeIndex = 0;
+    if (challengeNumber) {
+      const savedIndex = Number(sessionStorage.getItem('captcha-challenge-index') ?? '0');
+      if (Number.isInteger(savedIndex) && savedIndex >= 0 && savedIndex < 10) challengeNumber.value = String(savedIndex);
+    }
+
+    function finish() {
+      if (complete) return;
+      complete = true;
+      sessionStorage.setItem('captcha-solved', kind);
+      sessionStorage.setItem('captcha-challenge-index', String(challengeIndex));
+      window.location.assign('/verified/');
+    }
 
     function checkCompleted() {
       if (sessionStorage.getItem('captcha-solved')) window.location.replace('/verified/');
@@ -59,10 +75,16 @@ import SliderChallenge from '../components/SliderChallenge.astro';
       document.querySelectorAll<HTMLButtonElement>('[data-challenge]').forEach((button) => {
         button.addEventListener('click', async () => {
           kind = button.dataset.challenge ?? 'image';
+          challengeIndex = Number(challengeNumber?.value ?? '0');
+          sessionStorage.setItem('captcha-challenge-index', String(challengeIndex));
+          checkbox.disabled = false;
+          close.disabled = false;
+          checkbox.removeAttribute('data-success');
           dialog.dataset.kind = kind;
           dialog.dataset.phase = 'checkbox';
           const checkboxLabel = document.querySelector('#checkbox-label');
           if (checkboxLabel) checkboxLabel.textContent = kind === 'image' ? "I'm not a robot" : 'Verify you are human';
+          document.dispatchEvent(new CustomEvent('challenge-select', { detail: { kind, index: challengeIndex } }));
           document.dispatchEvent(new Event('challenge-reset'));
           checkboxStep.hidden = false;
           image.hidden = true;
@@ -76,6 +98,15 @@ import SliderChallenge from '../components/SliderChallenge.astro';
         });
       });
       checkbox.addEventListener('click', () => {
+        if (kind === 'turnstile') {
+          checkbox.disabled = true;
+          close.disabled = true;
+          checkbox.dataset.success = 'true';
+          const label = document.querySelector('#checkbox-label');
+          if (label) label.textContent = 'Success!';
+          window.setTimeout(finish, 500);
+          return;
+        }
         dialog.dataset.phase = 'challenge';
         checkboxStep.hidden = true;
         const challenge = kind === 'slider' ? slider : image;
@@ -85,6 +116,9 @@ import SliderChallenge from '../components/SliderChallenge.astro';
         }
       });
       close.addEventListener('click', () => dialog.close());
+      dialog.addEventListener('cancel', (event) => {
+        if (close.disabled) event.preventDefault();
+      });
       dialog.addEventListener('close', () => {
         if (document.fullscreenElement) document.exitFullscreen();
       });
@@ -93,9 +127,7 @@ import SliderChallenge from '../components/SliderChallenge.astro';
         const detail: unknown = event.detail;
         if (typeof detail !== 'object' || detail === null || !('state' in detail) || !('kind' in detail)) return;
         if (detail.state === 'success' && detail.kind === kind) {
-          complete = true;
-          sessionStorage.setItem('captcha-solved', kind);
-          window.location.assign('/verified/');
+          finish();
         }
       });
     }
@@ -111,6 +143,8 @@ import SliderChallenge from '../components/SliderChallenge.astro';
     .choice strong { font-weight: 550; }
     .choice span:first-of-type { grid-row: 2; font-size: .85rem; color: var(--muted); }
     .choice span:last-child { grid-row: 1 / 3; grid-column: 2; align-self: center; }
+    .challenge-option { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; font-size: .85rem; }
+    .challenge-option select { min-width: 76px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 3px; background: #fff; color: var(--text); }
     .fullscreen-option { display: flex; gap: 10px; align-items: center; font-size: .85rem; }
     .fullscreen-option + .fullscreen-option { margin-top: 12px; }
     .fullscreen-option input { width: 19px; height: 19px; accent-color: var(--accent); }
@@ -118,7 +152,7 @@ import SliderChallenge from '../components/SliderChallenge.astro';
     #fullscreen-status { font-size: .8rem; }
     dialog { width: min(400px, calc(100% - 32px)); max-height: calc(100dvh - 64px); padding: 0; border: 1px solid #ccc; border-radius: 3px; background: #fff; color: #111; font-family: Arial, sans-serif; overflow: visible; }
     dialog[data-phase='checkbox'] { width: 304px; border: 0; background: transparent; }
-    dialog[data-phase='checkbox'][data-kind='slider'] { width: 300px; }
+    dialog[data-phase='checkbox'][data-kind='turnstile'] { width: 300px; }
     dialog[data-phase='challenge'][data-kind='slider'] { width: min(380px, calc(100% - 32px)); }
     dialog::backdrop { background: #ffffffb3; backdrop-filter: blur(7px); }
     #close-challenge { display: grid; place-items: center; position: absolute; right: -5px; top: -36px; width: 28px; height: 28px; padding: 0; color: #555; background: transparent; border: 0; border-radius: 3px; }
@@ -133,11 +167,16 @@ import SliderChallenge from '../components/SliderChallenge.astro';
     .recaptcha-brand img { margin-bottom: 3px; }
     .widget-brand small { display: block; font-size: 8px; line-height: 10px; margin-top: 2px; }
     .turnstile-brand { display: none; }
-    [data-kind='slider'] #human-checkbox { width: 300px; height: 65px; gap: 8px; padding: 0 12px; border-color: #e0e0e0; border-radius: 0; box-shadow: none; }
-    [data-kind='slider'] .checkbox-box { width: 24px; height: 24px; border: 2px solid #6d6d6d; border-radius: 0; }
     [data-kind='slider'] .recaptcha-brand { display: none; }
-    [data-kind='slider'] .turnstile-brand { display: flex; }
-    [data-kind='slider'] .turnstile-brand small { font-size: 9px; }
+    .checkbox-check { display: none; }
+    #human-checkbox[data-success='true'] .checkbox-box { border: 0; background: transparent; }
+    #human-checkbox[data-success='true'] .checkbox-check { display: block; }
+    #human-checkbox:disabled { cursor: default; }
+    [data-kind='turnstile'] #human-checkbox { width: 300px; height: 65px; gap: 8px; padding: 0 12px; border-color: #e0e0e0; border-radius: 0; box-shadow: none; }
+    [data-kind='turnstile'] .checkbox-box { width: 24px; height: 24px; border: 2px solid #6d6d6d; border-radius: 0; }
+    [data-kind='turnstile'] .recaptcha-brand { display: none; }
+    [data-kind='turnstile'] .turnstile-brand { display: flex; }
+    [data-kind='turnstile'] .turnstile-brand small { font-size: 9px; }
     :global([data-contrast='high']) #human-checkbox { border-color: #000; background: #fff; }
     :global([data-contrast='high']) .checkbox-box { border-color: #000; }
     :global([data-contrast='high']) .widget-brand { color: #000; }
