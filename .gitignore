@@ -8,3 +8,5 @@ touch/experience.json
 touch/tip_model.json
 touch/tip_color.json
 touch/cam_geometry.json
+lerobot/
+__pycache__/
