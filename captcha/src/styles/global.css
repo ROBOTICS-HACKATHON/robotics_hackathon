@@ -1,0 +1,72 @@
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/dm-sans.woff2') format('woff2');
+}
+
+:root {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 18px;
+  color-scheme: light;
+  color: #242027;
+  background: #fff;
+  --text: #242027;
+  --muted: #665d6b;
+  --line: #ded6dc;
+  --accent: #2563eb;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; }
+/* The robot's stylus drags a little while it taps; that must never scroll, pan or zoom the page.
+   Touch is for tapping and the slider only. Mouse wheel and keyboard scrolling are unaffected. */
+html, body { overscroll-behavior: none; touch-action: none; }
+body { -webkit-user-select: none; user-select: none; }
+input, select, textarea { -webkit-user-select: auto; user-select: auto; }
+img { -webkit-user-drag: none; user-drag: none; }
+button, input { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+button { cursor: pointer; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+a { color: inherit; }
+h1, h2 { line-height: 1.15; letter-spacing: -.035em; font-weight: 550; }
+p { line-height: 1.5; }
+.button {
+  display: inline-block;
+  padding: 13px 20px;
+  min-height: 50px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--text);
+  text-decoration: none;
+}
+.button.primary { color: white; background: var(--accent); border-color: var(--accent); }
+.muted { color: var(--muted); }
+
+:root[data-contrast='high'] {
+  font-size: 20px;
+  --text: #000;
+  --muted: #000;
+  --line: #000;
+  --accent: #000;
+}
+:root[data-contrast='high'] :is(.choice, dialog, .button, #human-checkbox, #close-challenge) {
+  border: 3px solid #000;
+}
+:root[data-contrast='high'] .checkbox-box { border: 4px solid #000; }
+:root[data-contrast='high'] .brand-symbol { color: #000; }
+:root[data-contrast='high'] .image-tile { border: 3px solid #000; }
+:root[data-contrast='high'] .image-tile[aria-pressed='true'] { outline: 4px solid #000; outline-offset: -6px; }
+:root[data-contrast='high'] .selection-mark { width: 40px; height: 40px; font-size: 26px; line-height: 40px; border: 2px solid white; }
+:root[data-contrast='high'] .image-tile img { filter: contrast(1.4); }
+:root[data-contrast='high'] .puzzle-canvas { filter: contrast(1.4); }
+:root[data-contrast='high'] :is(.image-status, #slider-status) { color: #000; font-weight: 600; }
+:root[data-contrast='high'] input[type='range'] { --slider-thumb-width: 56px; }
+:root[data-contrast='high'] input[type='range']::-webkit-slider-thumb { background: #000; border: 2px solid white; width: var(--slider-thumb-width); height: 48px; margin-top: -5px; }
+:root[data-contrast='high'] input[type='range']::-moz-range-thumb { background: #000; border: 2px solid white; width: calc(var(--slider-thumb-width) - 4px); height: 44px; }
+:root[data-contrast='high'] input[type='range']::-webkit-slider-runnable-track { background: white; border: 2px solid #000; }
+:root[data-contrast='high'] input[type='range']::-moz-range-track { background: white; border: 2px solid #000; }

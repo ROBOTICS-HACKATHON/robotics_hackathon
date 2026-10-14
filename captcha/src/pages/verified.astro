@@ -1,0 +1,70 @@
+---
+import Page from '../layouts/Page.astro';
+---
+<Page title="Access granted · CAPTCHA demo">
+  <p id="result-error" role="alert" hidden></p>
+  <main hidden>
+    <span class="check" aria-hidden="true">✓</span>
+    <p class="muted">Verification complete</p>
+    <h1>Access granted.</h1>
+    <p>You completed <span id="solved-kind">image</span><span id="solved-variant"></span>. Welcome to the website.</p>
+    <button class="button" disabled>Verified</button>
+    <button id="restart" class="button primary">Start again</button>
+  </main>
+  <script>
+    import { imageChallenges } from '../data/image-challenges';
+    import { sliderChallenges } from '../data/slider-challenges';
+    import { readStorage, removeStorage, navigate } from '../lib/browser-state';
+    const error = document.querySelector<HTMLElement>('#result-error');
+    function report(message: string): void {
+      if (error) { error.textContent = message; error.hidden = false; }
+    }
+    const saved = readStorage('session', 'captcha-solved');
+    if (saved.isErr()) {
+      report('The browser cannot read the saved result. Enable storage for this site, then reload.');
+    } else if (saved.value !== 'image' && saved.value !== 'slider' && saved.value !== 'turnstile') {
+      navigate('/training/', true).match(() => {}, () => report('No verified result is saved. Open Training to start again.'));
+    } else {
+      const kind = saved.value;
+      const label = document.querySelector('#solved-kind');
+      const main = document.querySelector('main');
+      const practice = readStorage('session', 'captcha-practice-mode');
+      const index = readStorage('session', 'captcha-challenge-index');
+      const total = readStorage('session', 'captcha-session-total');
+      const challengeId = readStorage('session', 'captcha-challenge-id');
+      if (practice.isErr() || index.isErr() || total.isErr() || challengeId.isErr()) {
+        report('The browser cannot read the complete result. Enable storage for this site, then reload.');
+      } else {
+        if (label) label.textContent = practice.value === 'tile' ? 'single tile practice'
+          : practice.value === 'slider' ? 'slider practice'
+          : practice.value === 'checkbox' ? 'checkbox practice'
+          : kind === 'turnstile' ? 'Cloudflare Turnstile verification' : `${kind} challenge`;
+        const variant = document.querySelector('#solved-variant');
+        const challengeIndex = Number(index.value ?? '0');
+        const sessionTotal = Number(total.value ?? '0');
+        const count = kind === 'image' ? imageChallenges.length : sliderChallenges.length;
+        if (sessionTotal > 0 && Number.isInteger(sessionTotal)) {
+          if (label) label.textContent = `a session of ${sessionTotal} tasks`;
+        } else if (variant && kind !== 'turnstile' && Number.isInteger(challengeIndex) && challengeIndex >= 0 && challengeIndex < count) {
+          const challenges = kind === 'image' ? imageChallenges : sliderChallenges;
+          variant.textContent = ` ${challengeId.value ?? challenges[challengeIndex]?.id ?? ''}`;
+        }
+        if (main) main.hidden = false;
+      }
+    }
+    document.querySelector('#restart')?.addEventListener('click', () => {
+      const cleared = removeStorage('session', 'captcha-solved')
+        .andThen(() => removeStorage('session', 'captcha-session-total'));
+      if (cleared.isErr()) { report('Could not clear the saved result. Enable site storage, then select Start again.'); return; }
+      navigate('/training/', true).match(() => {}, () => report('Could not open Training. Reload to start again.'));
+    });
+  </script>
+  <style>
+    #result-error { max-width: 640px; margin: 24px auto; padding: 24px; color: #8b1e1e; }
+    main { max-width: 640px; margin: 18vh auto; padding: 24px; }
+    h1 { font-size: 2.5rem; margin: 12px 0; }
+    .check { display: inline-grid; place-items: center; width: 60px; height: 60px; border: 1px solid #17683c; border-radius: 50%; font-size: 2rem; color: #17683c; }
+    .button { margin: 24px 8px 0 0; }
+    .button:disabled { color: #17683c; cursor: default; }
+  </style>
+</Page>

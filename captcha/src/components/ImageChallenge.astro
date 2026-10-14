@@ -1,0 +1,319 @@
+---
+import { imageChallenges } from '../data/image-challenges';
+const imageChallenge = imageChallenges[0];
+---
+
+<section id="image-challenge" class="image-challenge" aria-labelledby="image-heading" hidden>
+  <header class="challenge-heading">
+    <h2 id="image-heading">
+      <span class="image-instruction">{imageChallenge.instruction}</span>
+      <strong class="image-subject">{imageChallenge.subject}</strong>
+    </h2>
+  </header>
+  <div class="image-grid" role="group" aria-labelledby="image-heading">
+    {imageChallenge.tiles.map((tile, index) => (
+      <button type="button" class="image-tile" data-tile-index={index} aria-pressed="false">
+        <img src={tile.src} alt={tile.alt} width="240" height="240" draggable="false" loading="lazy" decoding="async" />
+        <span class="selection-mark" aria-hidden="true">✓</span>
+        <span class="practice-tag">Click this tile</span>
+      </button>
+    ))}
+  </div>
+  <div class="challenge-feedback">
+    <p class="image-status" role="status" aria-live="polite">No images selected.</p>
+    <span class="selection-count" aria-hidden="true">0 / 9</span>
+  </div>
+  <footer class="challenge-actions">
+    <button type="button" class="reset-button" aria-label="Reset challenge" title="Reset challenge">
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+        <path fill="currentColor" d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.93 9h-2.02A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z" />
+      </svg>
+    </button>
+    <button type="button" class="verify-button">Verify</button>
+  </footer>
+</section>
+
+<script>
+  import { imageChallenges, type ImageChallenge } from '../data/image-challenges';
+
+  const section = document.querySelector<HTMLElement>('#image-challenge');
+  const tiles = Array.from(document.querySelectorAll<HTMLButtonElement>('#image-challenge .image-tile'));
+  const status = document.querySelector<HTMLElement>('#image-challenge .image-status');
+  const count = document.querySelector<HTMLElement>('#image-challenge .selection-count');
+  const verify = document.querySelector<HTMLButtonElement>('#image-challenge .verify-button');
+  const resetButton = document.querySelector<HTMLButtonElement>('#image-challenge .reset-button');
+  const instruction = document.querySelector<HTMLElement>('#image-challenge .image-instruction');
+  const subject = document.querySelector<HTMLElement>('#image-challenge .image-subject');
+
+  if (section && status && count && verify && resetButton) {
+    let activeChallenge: ImageChallenge = imageChallenges[0];
+    const selected = new Set<number>();
+    let state: 'idle' | 'success' | 'error' = 'idle';
+    let practiceTile: number | undefined;
+
+    function setState(next: 'idle' | 'success' | 'error') {
+      state = next;
+      section?.setAttribute('data-state', next);
+      section?.dispatchEvent(new CustomEvent('challenge-state', {
+        bubbles: true,
+        detail: { kind: 'image', state: next },
+      }));
+    }
+
+    function reset() {
+      selected.clear();
+      const dialog = section?.closest('dialog');
+      const target = Number(dialog?.dataset.practiceTile ?? '0');
+      practiceTile = undefined;
+      if (dialog?.dataset.practice === 'tile') {
+        practiceTile = Number.isInteger(target) && target >= 0 && target < tiles.length ? target : 0;
+      }
+      section?.toggleAttribute('data-practice', practiceTile !== undefined);
+      if (instruction) instruction.textContent = practiceTile === undefined
+        ? activeChallenge.instruction : 'Click the highlighted tile.';
+      if (subject) {
+        subject.textContent = activeChallenge.subject;
+        subject.hidden = practiceTile !== undefined;
+      }
+      for (const [index, tile] of tiles.entries()) {
+        tile.setAttribute('aria-pressed', 'false');
+        tile.disabled = practiceTile !== undefined && index !== practiceTile;
+        tile.toggleAttribute('data-practice-target', index === practiceTile);
+      }
+      if (status) status.textContent = practiceTile === undefined ? 'No images selected.' : 'Click the highlighted tile to complete practice.';
+      if (count) count.textContent = `0 / ${tiles.length}`;
+      if (verify) {
+        verify.disabled = false;
+        verify.hidden = practiceTile !== undefined;
+      }
+      setState('idle');
+    }
+
+    tiles.forEach((tile, index) => {
+      tile.addEventListener('click', () => {
+        if (state === 'success') return;
+        if (practiceTile !== undefined) {
+          if (index !== practiceTile) return;
+          tile.setAttribute('aria-pressed', 'true');
+          status.textContent = 'Verified. Target clicked.';
+          for (const button of tiles) button.disabled = true;
+          setState('success');
+          return;
+        }
+        if (selected.has(index)) selected.delete(index);
+        else selected.add(index);
+        tile.setAttribute('aria-pressed', String(selected.has(index)));
+        count.textContent = `${selected.size} / ${tiles.length}`;
+        status.textContent = selected.size === 0
+          ? 'No images selected.'
+          : `${selected.size} image${selected.size === 1 ? '' : 's'} selected.`;
+        setState('idle');
+      });
+    });
+
+    verify.addEventListener('click', () => {
+      const matches = activeChallenge.tiles.every((tile, index) => tile.correct === selected.has(index));
+      if (matches) {
+        status.textContent = 'Verified. Challenge complete.';
+        verify.disabled = true;
+        for (const tile of tiles) tile.disabled = true;
+        setState('success');
+      } else {
+        status.textContent = 'Incorrect selection. Try again.';
+        setState('error');
+      }
+    });
+
+    resetButton.addEventListener('click', reset);
+    document.addEventListener('challenge-reset', reset);
+    document.addEventListener('challenge-select', (event) => {
+      if (!(event instanceof CustomEvent)) return;
+      const detail: unknown = event.detail;
+      if (!detail || typeof detail !== 'object'
+        || !('kind' in detail) || detail.kind !== 'image'
+        || !('index' in detail) || typeof detail.index !== 'number'
+        || !Number.isInteger(detail.index)) return;
+      const next = imageChallenges[detail.index];
+      if (!next) return;
+      activeChallenge = next;
+      if (instruction) instruction.textContent = next.instruction;
+      if (subject) subject.textContent = next.subject;
+      tiles.forEach((tile, index) => {
+        const photo = next.tiles[index];
+        const image = tile.querySelector<HTMLImageElement>('img');
+        if (!photo || !image) return;
+        image.src = photo.src;
+        image.alt = photo.alt;
+      });
+      reset();
+    });
+  }
+</script>
+
+<style>
+  .image-challenge {
+    width: 100%;
+    padding-top: 7px;
+    color: #222;
+    background: #fff;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+
+  .challenge-heading {
+    margin: 0 7px;
+    padding: 24px;
+    min-height: 113px;
+    background: #1a73e8;
+    color: #fff;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.3;
+    letter-spacing: normal;
+  }
+
+  h2 span, h2 strong { display: block; }
+  h2 strong { font-size: 28px; font-weight: 900; }
+
+  .image-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2px;
+    margin: 7px;
+  }
+
+  .image-tile {
+    position: relative;
+    display: block;
+    aspect-ratio: 1;
+    min-width: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    border-radius: 0;
+    background: #fff;
+    cursor: pointer;
+  }
+
+  .image-tile img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .image-tile[aria-pressed='true'] img { transform: scale(0.8); }
+
+  .image-tile:focus-visible, .challenge-actions button:focus-visible {
+    outline: 2px solid #185abc;
+    outline-offset: -2px;
+  }
+
+  .selection-mark {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: #1a73e8;
+    color: #fff;
+    font: bold 20px/30px Arial, sans-serif;
+    text-align: center;
+  }
+
+  .image-tile[aria-pressed='true'] .selection-mark { display: block; }
+
+  .challenge-feedback { margin: 0; }
+  .image-status, .selection-count {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  [data-state='error'] .image-status {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 8px 7px;
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+    color: #c5221f;
+    font-size: 14px;
+    text-align: center;
+  }
+
+  .challenge-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 60px;
+    padding: 7px;
+    border-top: 1px solid #dfdfdf;
+  }
+
+  .challenge-actions button { font-family: inherit; cursor: pointer; }
+  .reset-button {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 42px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #757575;
+  }
+
+  .reset-button:hover { color: #444; }
+  .verify-button {
+    min-width: 100px;
+    height: 42px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 2px;
+    color: #fff;
+    background: #1a73e8;
+    font-size: 14px;
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+
+  .verify-button:hover { background: #185abc; }
+  .image-tile:disabled { cursor: default; }
+  .practice-tag { display: none; }
+  [data-practice] .image-tile:disabled:not([data-practice-target]) { opacity: .4; }
+  .image-tile[data-practice-target]::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: 4px solid #000;
+    box-shadow: inset 0 0 0 2px #fff;
+    pointer-events: none;
+  }
+  [data-practice-target] .practice-tag {
+    display: block;
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
+    padding: 5px 2px;
+    border: 1px solid #fff;
+    background: #000;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+    pointer-events: none;
+  }
+  .verify-button:disabled { cursor: default; background: #8ab4f8; }
+</style>

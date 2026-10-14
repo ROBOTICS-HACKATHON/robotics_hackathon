@@ -1,0 +1,71 @@
+---
+import '../styles/global.css';
+import ScreenMarkers from '../components/ScreenMarkers.astro';
+interface Props { title: string }
+const { title } = Astro.props;
+const training = Astro.url.pathname.startsWith('/training') || Astro.url.pathname.startsWith('/verified');
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <script is:inline>
+      try {
+        document.documentElement.dataset.contrast = localStorage.getItem('captcha-contrast') === 'high' ? 'high' : 'normal';
+      } catch {
+        document.documentElement.dataset.contrast = 'normal';
+      }
+    </script>
+    <script is:inline>
+      // The robot's stylus drags while it presses. Browsers drop the click when a touch moves more than a
+      // few pixels, so a tap that wanders would do nothing. If a touch/pen press ends without a native click,
+      // click the control that was first touched. The slider is left to its own drag handling.
+      (() => {
+        const MAX_TRAVEL = 150, WAIT_MS = 60;
+        const CONTROL = 'button, a[href], label, summary, input:not([type="range"])';
+        let down = null, nativeClick = false;
+        document.addEventListener('click', () => { nativeClick = true; }, true);
+        // Dragging across a picture would start an image drag-and-drop, which cancels the touch.
+        document.addEventListener('dragstart', (e) => e.preventDefault(), true);
+        document.addEventListener('pointermove', (e) => { if (down && e.isPrimary) { down.lx = e.clientX; down.ly = e.clientY; } }, true);
+        document.addEventListener('pointerdown', (e) => {
+          if (e.pointerType === 'mouse' || !e.isPrimary) return;
+          nativeClick = false;
+          const el = e.target instanceof Element ? e.target.closest(CONTROL) : null;
+          down = el && !el.disabled && !el.closest('.puzzle-canvas, input[type="range"]') ? { el, x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY } : null;
+        }, true);
+        const finish = (e, cancelled) => {
+          const start = down;
+          down = null;
+          if (!start || cancelled || e.pointerType === 'mouse' || !e.isPrimary) return;
+          if (Math.hypot(start.lx - start.x, start.ly - start.y) > MAX_TRAVEL) return;
+          setTimeout(() => { if (!nativeClick && start.el.isConnected && !start.el.disabled) start.el.click(); }, WAIT_MS);
+        };
+        document.addEventListener('pointerup', (e) => finish(e, false), true);
+        document.addEventListener('pointercancel', (e) => finish(e, false), true);
+      })();
+    </script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="site-name" href="/">Robot CAPTCHA</a>
+      <nav aria-label="Main navigation">
+        <a href="/" aria-current={!training ? 'page' : undefined}>Demo</a>
+        <a href="/training/" aria-current={training ? 'page' : undefined}>Training</a>
+      </nav>
+    </header>
+    <slot /><ScreenMarkers />
+  </body>
+</html>
+
+<style>
+  .site-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; max-width: 1100px; margin: auto; padding: 22px 28px; border-bottom: 1px solid var(--line); font-size: .78rem; }
+  .site-header a { text-decoration: none; }
+  .site-name { font-weight: 700; letter-spacing: -.025em; }
+  nav { display: flex; gap: 24px; }
+  nav a { color: var(--muted); padding: 6px 0; }
+  nav a[aria-current='page'] { color: var(--text); box-shadow: 0 2px var(--text); }
+  @media (max-width: 480px) { .site-header { padding: 18px 20px; } nav { gap: 18px; } }
+</style>

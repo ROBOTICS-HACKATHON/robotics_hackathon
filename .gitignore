@@ -16,3 +16,6 @@ touch/site_layout.json
 touch/tap_style.json
 touch/tap_style.json
 touch/directions.json
+node_modules/
+.astro/
+dist/
