@@ -21,7 +21,8 @@ class TouchServer:
     def __init__(self, port=8765, keys=None, **state):
         self.touches = queue.Queue()  # dicts: u, v, w, h (frame size in px), t
         self.keys = keys if keys is not None else queue.Queue()  # Enter/Space pressed on the page
-        self.touched = threading.Event()  # set the moment any touch arrives (used to stop pressing)
+        self.touched = threading.Event()
+        self.traces = queue.Queue()  # full contacts from the page: {"pts": [[u, v, ms], ...], "ms": duration}  # set the moment any touch arrives (used to stop pressing)
         self.state = {"step": 0, "msg": "Starting...", "mode": "calib", **state}
         srv = self
 
@@ -50,6 +51,11 @@ class TouchServer:
                 if self.path == "/key":  # Enter/Space on the page = Enter in the terminal
                     srv.keys.put("page")
                     return self._send(200, b"{}")
+                if self.path == "/trace":  # whole contact: points while touching, duration (drag check)
+                    d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                    d["t_end"] = time.time()
+                    srv.traces.put(d)
+                    return self._send(200, b"{}")
                 if self.path != "/touch":
                     return self._send(404, b"{}")
                 d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
@@ -70,6 +76,26 @@ class TouchServer:
         self.touched.clear()
         while not self.touches.empty():
             self.touches.get_nowait()
+        while not self.traces.empty():
+            self.traces.get_nowait()
+
+    def all_traces(self, wait=0.6):
+        """Contacts that ended since drain(), each summarised: drag (how far the stylus slid while touching,
+        px), contact time (ms), start/end point. Waits briefly for the page to report the lift-off."""
+        end = time.time() + wait
+        while self.traces.empty() and time.time() < end:
+            time.sleep(0.02)
+        out = []
+        while not self.traces.empty():
+            d = self.traces.get_nowait()
+            pts = d.get("pts") or []
+            w, h = d.get("w") or 1000, d.get("h") or 1000
+            if pts:
+                x0, y0 = pts[0][0] * w, pts[0][1] * h
+                d["drag_px"] = round(max(((p[0] * w - x0) ** 2 + (p[1] * h - y0) ** 2) ** 0.5 for p in pts), 1)
+                d["slide_px"] = round(((pts[-1][0] * w - x0) ** 2 + (pts[-1][1] * h - y0) ** 2) ** 0.5, 1)
+            out.append(d)
+        return out
 
     def all_touches(self):
         out = []

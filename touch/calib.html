@@ -78,8 +78,31 @@
     status("Enter sent"); holdMsgUntil = Date.now() + 800;
   });
 
+  // Full contact trace: where the stylus went while touching and for how long (shows drags).
+  let trace = null;
+  const at = e => { const r = f.getBoundingClientRect();
+    return [+((e.clientX - r.left) / r.width).toFixed(5), +((e.clientY - r.top) / r.height).toFixed(5)]; };
+  addEventListener("pointermove", e => {
+    if (!trace || e.pointerId !== trace.id) return;
+    const now = performance.now();
+    if (now - trace.last < 8) return;
+    trace.last = now; trace.pts.push([...at(e), Math.round(now - trace.t0)]);
+  });
+  const endTrace = e => {
+    if (!trace || e.pointerId !== trace.id) return;
+    const r = f.getBoundingClientRect();
+    trace.pts.push([...at(e), Math.round(performance.now() - trace.t0)]);
+    if (live) fetch("/trace", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({pts: trace.pts, ms: Math.round(performance.now() - trace.t0), kind: trace.kind,
+                            ended: e.type, w: r.width, h: r.height})});
+    trace = null;
+  };
+  addEventListener("pointerup", endTrace);
+  addEventListener("pointercancel", endTrace);
+
   addEventListener("pointerdown", e => {
     e.preventDefault();
+    trace = {id: e.pointerId, t0: performance.now(), last: 0, kind: e.pointerType, pts: [[...at(e), 0]]};
     const r = f.getBoundingClientRect();
     const u = (e.clientX - r.left) / r.width, v = (e.clientY - r.top) / r.height;
     document.getElementById("last").textContent = `${u.toFixed(3)} ${v.toFixed(3)}`;

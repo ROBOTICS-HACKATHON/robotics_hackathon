@@ -131,6 +131,8 @@ class Tapper:
         g.peak = 0.0
         self.last_hover_obs, self.last_vision = None, None
         self.last_hover_q, self.last_press_height = None, None
+        self.tap_log, self._t0 = [], time.time()
+        self._ev("start", touch_cmd=touch)
         if self.vision is not None and self.vision.enabled:
             # most of your path, then hover just above the target, look, correct, then straight down
             k = int(0.75 * (len(down) - 1))
@@ -157,7 +159,9 @@ class Tapper:
             if not why:
                 hover = touch + (self.model.home - touch) * self.hover_frac
                 self.last_hover_q = hover
+                self._ev("above_target", cmd=hover)
                 why = follow_path(self.robot, np.array([hover, touch]), 0.8 / self.speed, guard=g, guard_from=0.3)
+                self._ev("down", cmd=touch, why=why)
             approach_dir = touch - (touch + (self.model.home - touch) * self.hover_frac)
             self.last_touch_q = touch
         else:
@@ -169,9 +173,11 @@ class Tapper:
             why = follow_path(self.robot, down[:k + 1], self.tap_from * t_down / self.speed, guard=g, guard_from=1.1)
             if not why:
                 why = settle(self.robot, hover, timeout=0.6, guard=g)[1]
+            self._ev("above_target", cmd=hover, why=why)
             if not why:
                 why = follow_path(self.robot, np.array([hover, touch]), max(0.5, 0.35 * t_down) / self.speed,
                                   guard=g, guard_from=0.3)
+            self._ev("down", cmd=touch, why=why)
             approach_dir = (touch - hover) * (0.4 / max(1e-6, 1 - self.tap_from))  # same press depth as before
         self.last_settle_err = None
         if not why:
@@ -182,6 +188,7 @@ class Tapper:
             if not why:
                 self.last_settle_err, why = settle(self.robot, pressed, timeout=self.dwell + 0.8, guard=g)
         self.last_stop = why
+        self._ev("pressed", why=why)
         self.last_force_stop, self.last_peak_load = why == "force", g.peak
         if why != "touch" and self.vision is not None and self.vision.enabled:
             # no touch registered (yet): the cameras measure how far above the glass the tip stopped.
@@ -198,10 +205,29 @@ class Tapper:
         time.sleep(why_wait)
         # lift STRAIGHT back up the line it came down (no sliding on the glass), then your path home
         lift_to = self.last_hover_q if self.last_hover_q is not None else touch + (self.model.home - touch) * self.hover_frac
+        self._ev("lift_start")
         follow_path(self.robot, np.array([read_joints(self.robot), lift_to]), 0.35 / self.speed)
         settle(self.robot, lift_to, timeout=0.3)
+        self._ev("lifted", cmd=lift_to)
         follow_path(self.robot, up, t_up / self.speed, start=read_joints(self.robot))
+        self._ev("home")
         self.at_home = True
+
+    def _ev(self, name, cmd=None, **kw):
+        """One line of the per-tap motion log: time, where the arm was told to be, where it really is."""
+        try:
+            act = read_joints(self.robot)
+        except Exception:
+            act = None
+        e = {"ev": name, "t": round(time.time() - getattr(self, "_t0", time.time()), 3),
+             "act": None if act is None else [round(float(x), 2) for x in act]}
+        if cmd is not None:
+            e["cmd"] = [round(float(x), 2) for x in cmd]
+            if act is not None:
+                e["err_deg"] = round(float(np.abs(np.asarray(cmd)[:5] - act[:5]).max()), 2)
+        for k, x in kw.items():
+            e[k] = [round(float(y), 2) for y in x] if isinstance(x, np.ndarray) else x
+        getattr(self, "tap_log", []).append(e)
 
     def _jacobian(self, u, v, h=0.01):
         tp = self.model.touch_pose
@@ -362,7 +388,10 @@ if __name__ == "__main__":
             if srv:
                 time.sleep(0.3)  # give the page time to report
                 got = srv.all_touches()
+                traces = srv.all_traces()
                 r = {"target": [u, v], "command": list(t.last_command), "touches": got,
+                     "contacts": traces, "motion": t.tap_log,
+                     "drag_px": max((c.get("drag_px", 0) for c in traces), default=None),
                      "settle_err_deg": t.last_settle_err, "force_stop": t.last_force_stop,
                      "peak_load_jump": t.last_peak_load, "stopped_by": t.last_stop,
                      "vision": t.last_vision, "hover_obs": t.last_hover_obs,
@@ -397,6 +426,9 @@ if __name__ == "__main__":
                     line += "  NO TOUCH registered" + (" (force guard stopped it: try --max-load 300)" if t.last_force_stop else "") + (
                         f" (arm stopped {se:.1f} deg short: blocked by the screen or too weak)" if se and se > 1.5
                         else " (arm reached its pose: press deeper with --press 0.08)")
+                if r.get("drag_px") is not None:
+                    c = max(r["contacts"], key=lambda c: c.get("drag_px", 0))
+                    line += f"  drag {r['drag_px']:.0f}px in {c.get('ms')}ms" + ("  <- DRAGGED" if r["drag_px"] > 15 else "")
                 results.append(r)
             if t.last_force_stop:
                 line += "  [force guard stopped the push]"
