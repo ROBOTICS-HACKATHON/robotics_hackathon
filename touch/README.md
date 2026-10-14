@@ -92,6 +92,18 @@ feeds (screen outlined green, tip circled), plus live: height of the tip above t
 the screen, and whether the two cameras agree. Move the stylus by hand to test. Set `SCREEN_WIDTH_MM` (marker
 to marker) in `lr.conf` for real millimetres.
 
+The live page also has:
+- **Frame rate / phone resolution / quality** controls (IP Webcam phones are set remotely; 1280x720 is plenty).
+- **Save photo:** full-size frames + what it detected, in `outputs/snapshots/`. `./lr share` copies photos and
+  logs to `Downloads/robot-share` for analysis.
+- **Click the pen tip** in a picture to teach its colour (saved in `touch/tip_color.json`, used by tap and
+  practice too; "reset taught colour" undoes it). "Pause" freezes the picture, "show what it thinks is the pen"
+  tints the matching pixels.
+- **Flip cam 1/2** for an upside-down camera (remembered).
+- **Teach distance:** hold the tip still and press "touching" or "this far: N mm" (2+ of each, at different
+  places). It learns the screen shape, each phone's lens and how high the marker sits at contact
+  (`touch/cam_geometry.json`). Needed whenever the screen is a different shape than the default (1.51:1).
+
 ## Protecting the screen
 
 - **Stop on touch (tests and practice):** the page reports a touch the instant the glass registers it, and the

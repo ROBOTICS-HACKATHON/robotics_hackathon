@@ -277,7 +277,23 @@ cmd_tip-live() {
   [ -n "${CAMERA2:-}" ] && cams="${cams:+$cams,}$CAMERA2"
   say "Open http://localhost:8766/ in your browser (Ctrl+C here to stop)"
   RUN_EXTRA="-p 8766:8766" run_hw python /repo/touch/tipvision.py --cameras "$cams" --color "${TIP_COLOR:-pink}" \
-    --screen-mm "${SCREEN_WIDTH_MM:-300}" --live
+    --screen-mm "${SCREEN_WIDTH_MM:-300}" --live --out /work/outputs
+}
+
+cmd_share() {
+  # copy photos + logs to a folder Windows (and Claude) can reach
+  local dest="${SHARE_DIR:-}"
+  if [ -z "$dest" ] && command -v cmd.exe >/dev/null 2>&1; then
+    dest="$(wslpath "$(cmd.exe /c 'echo %USERPROFILE%' 2>/dev/null | tr -d '\r')")/Downloads/robot-share"
+  fi
+  [ -z "$dest" ] && die "Set SHARE_DIR=/some/folder in lr.conf"
+  mkdir -p "$dest"
+  [ -d "$OUT/snapshots" ] && cp -r "$OUT/snapshots" "$dest/"
+  [ -d "$HERE/touch/logs" ] && cp -r "$HERE/touch/logs" "$dest/"
+  for f in touch/tip_color.json touch/tip_model.json touch/screen_calib.json touch/experience.json; do
+    [ -f "$HERE/$f" ] && cp "$HERE/$f" "$dest/"
+  done
+  say "Copied photos + logs to $dest"
 }
 
 cmd_cam-test() {
@@ -324,6 +340,8 @@ Touch screen
   cam-test [CAMERA]         Test a camera (USB or phone): resolution, speed, markers found
   tip-test [CAM1,CAM2]      Tip vision check: sticker found?, viewing angles, can the pair measure height?
   tip-live                  Live browser view of both cameras + tip height in mm (no arm needed)
+                            (save photos, click the pen tip to teach its colour)
+  share                     Copy saved photos + logs to Downloads/robot-share (to send for analysis)
 
   shell                     Open a shell inside the container
 EOF
@@ -331,7 +349,7 @@ EOF
 
 c="${1:-help}"; shift || true
 case "$c" in
-  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice|cam-test|tip-test|heatmap|tip-live)
+  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice|cam-test|tip-test|heatmap|tip-live|share)
     "cmd_$c" "$@" ;;
   *) cmd_help; exit 1 ;;
 esac

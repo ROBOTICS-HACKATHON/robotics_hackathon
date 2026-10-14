@@ -9,7 +9,7 @@ Camera sources (--camera, or CAMERA= in lr.conf):
   ipwebcam:192.168.1.23            phone with the "IP Webcam" app (Android)
   droidcam:192.168.1.23            phone with the "DroidCam" app (Android / iOS)
   http://192.168.1.23:8080/shot.jpg   any snapshot URL (a fresh JPEG per request)
-  http://.../video   rtsp://...    any MJPEG / RTSP stream
+  http://.../video   rtsp://...    any MJPEG / RTSP stream (/video and .mjpg are read in the background: fast)
   photo.jpg                        a saved image (for testing)
 
   python see.py --camera ipwebcam:192.168.1.23
@@ -26,6 +26,8 @@ Use from Python:
 
 import argparse
 import json
+import re
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -45,13 +47,23 @@ DETECT_MAX = 1600  # big phone frames are shrunk for finding markers (faster), c
 def resolve(spec):
     """Turn a short camera spec into something OpenCV / urllib can open."""
     s = str(spec).strip()
-    if s.startswith("ipwebcam:"):
+    if s.startswith("ipwebcam:"):  # continuous MJPEG stream: much faster than one /shot.jpg per frame
         host = s.split(":", 1)[1]
-        return f"http://{host}{'' if ':' in host else ':8080'}/shot.jpg"
+        return f"http://{host}{'' if ':' in host else ':8080'}/video"
     if s.startswith("droidcam:"):
         host = s.split(":", 1)[1]
         return f"http://{host}{'' if ':' in host else ':4747'}/video"
     return s
+
+
+ROT_FILE = Path(__file__).resolve().parent.parent / "outputs" / "cam_rotation.json"
+
+
+def _rotated():
+    try:
+        return set(json.loads(ROT_FILE.read_text()))
+    except Exception:
+        return set()
 
 
 class FrameSource:
@@ -61,6 +73,10 @@ class FrameSource:
         self.spec = resolve(spec)
         s = self.spec
         self.kind = None
+        self.rot180 = self.spec in _rotated()  # camera mounted upside down: turned in software
+        self.fps = 0.0  # pictures per second the camera actually delivers (streams)
+        # IP Webcam can be remote-controlled (resolution, quality) through its web API
+        self.phone_api = self.spec.rsplit("/", 1)[0] if str(spec).strip().startswith("ipwebcam:") else None
         if s.isdigit() or s.startswith("/dev/"):
             self.kind = "device"
             self.cap = cv2.VideoCapture(int(s) if s.isdigit() else s)
@@ -70,6 +86,11 @@ class FrameSource:
             time.sleep(1)
         elif s.startswith(("http://", "https://")) and s.lower().split("?")[0].endswith((".jpg", ".jpeg", ".png")):
             self.kind = "snapshot"  # a fresh picture per request: never stale
+        elif s.startswith(("http://", "https://")) and s.split("?")[0].rstrip("/").endswith(("/video", ".mjpg", ".mjpeg")):
+            self.kind = "mjpeg"  # phone apps: read in the background, always keep the newest picture
+            self._jpg, self._t, self._err = None, 0.0, None
+            self._cond = threading.Condition()
+            threading.Thread(target=self._mjpeg_loop, daemon=True).start()
         elif s.startswith(("http://", "https://", "rtsp://")):
             self.kind = "stream"
             self.cap = cv2.VideoCapture(s)
@@ -80,8 +101,65 @@ class FrameSource:
             raise SystemExit(f"Don't know how to open camera '{spec}'. Examples: /dev/video4, "
                              "ipwebcam:192.168.1.23, droidcam:192.168.1.23, http://.../shot.jpg")
 
+    def _mjpeg_loop(self):
+        while True:
+            try:
+                r = urllib.request.urlopen(self.spec, timeout=5)
+                buf = b""
+                while True:
+                    chunk = r.read1(65536)  # whatever has arrived, no waiting for a full block
+                    if not chunk:
+                        break
+                    buf += chunk
+                    jpg = None
+                    while True:  # cut out every complete frame, keep the newest
+                        start = buf.find(b"\xff\xd8")
+                        if start < 0:
+                            buf = buf[-1024:]  # may hold the next part's header
+                            break
+                        m = None
+                        for m in re.finditer(rb"Content-Length:\s*(\d+)", buf[max(0, start - 400):start], re.I):
+                            pass
+                        if m:
+                            end = start + int(m.group(1))
+                            if len(buf) < end:
+                                break
+                        else:  # no length given: the frame ends where the next part starts
+                            nxt = buf.find(b"\r\n--", start)
+                            if nxt < 0:
+                                buf = buf[-8_000_000:]
+                                break
+                            end = buf.rfind(b"\xff\xd9", start, nxt) + 2
+                            if end < 2:
+                                buf = buf[nxt:]
+                                continue
+                        jpg, buf = buf[start:end], buf[end:]
+                    if jpg:
+                        now = time.time()
+                        self._stamps = [t for t in getattr(self, "_stamps", []) if now - t < 2] + [now]
+                        self.fps = (len(self._stamps) - 1) / max(now - self._stamps[0], 1e-3)
+                        with self._cond:
+                            self._jpg, self._t, self._err = jpg, now, None
+                            self._cond.notify_all()
+            except Exception as e:
+                with self._cond:
+                    self._err = e
+                    self._cond.notify_all()
+                time.sleep(1)
+
     def read(self):
-        if self.kind == "snapshot":
+        if self.kind == "mjpeg":
+            # wait for a picture taken after this call, so a moving arm is never seen late
+            t0, deadline = time.time(), time.time() + 5
+            with self._cond:
+                while self._t < t0 and time.time() < deadline:
+                    self._cond.wait(0.2)
+                data, err = (self._jpg if self._t >= t0 else None), self._err
+            if data is None:
+                raise RuntimeError(f"No picture from the phone at {self.spec}" + (f": {err}" if err else "")
+                                   + ". Same Wi-Fi? App running? Address right?")
+            f = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        elif self.kind == "snapshot":
             try:
                 data = urllib.request.urlopen(self.spec, timeout=5).read()
             except Exception as e:
@@ -100,7 +178,26 @@ class FrameSource:
                     else "Same Wi-Fi? Is the camera app streaming?"))
         if f is None:
             raise RuntimeError(f"Got no image from {self.spec}")
-        return f
+        return cv2.rotate(f, cv2.ROTATE_180) if self.rot180 else f
+
+    def set_rot180(self, on):
+        """Turn this camera's picture upside down (remembered for every command)."""
+        self.rot180 = bool(on)
+        r = _rotated()
+        (r.add if on else r.discard)(self.spec)
+        ROT_FILE.parent.mkdir(exist_ok=True)
+        ROT_FILE.write_text(json.dumps(sorted(r)))
+
+    def phone_set(self, setting, value):
+        """Change an IP Webcam setting, e.g. ('video_size', '1280x720') or ('quality', 50).
+        Returns None if it worked, else the reason."""
+        if not self.phone_api:
+            return "not an IP Webcam phone"
+        try:
+            urllib.request.urlopen(f"{self.phone_api}/settings/{setting}?set={value}", timeout=3).read()
+            return None
+        except Exception as e:
+            return str(e)
 
     def close(self):
         if getattr(self, "cap", None) is not None:

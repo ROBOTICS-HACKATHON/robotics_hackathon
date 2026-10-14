@@ -1,10 +1,10 @@
 lr.conf
 outputs/
 .venv/
-lerobot/
 touch/screen_calib.json
 touch/logs/
 touch/screen_correction.json
-touch/logs/
-touch/screen_correction.json
 touch/experience.json
+touch/tip_model.json
+touch/tip_color.json
+touch/cam_geometry.json
