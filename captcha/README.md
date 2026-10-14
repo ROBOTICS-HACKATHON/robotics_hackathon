@@ -11,7 +11,9 @@ mise run dev
 
 Open http://localhost:4321. Build with `mise run build`.
 
-The four corner ArUco markers reuse `touch/markers/aruco_0.png` through `aruco_3.png`
+Enable "Camera markers" to show the four corner ArUco markers. They are off by
+default, and the browser remembers the setting across reloads and the result page.
+They reuse `touch/markers/aruco_0.png` through `aruco_3.png`
 from the arm's click-test page. They stay sharp above open challenge dialogs, use
 the same 18 CSS pixel inset, and do not intercept clicks. Marker IDs are 0 at
 top-left, 1 at top-right, 2 at bottom-right, and 3 at bottom-left. Use fullscreen

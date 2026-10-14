@@ -13,14 +13,38 @@ const markers = [topLeft, topRight, bottomRight, bottomLeft];
 </div>
 
 <script>
+  import { readStorage, writeStorage } from '../lib/browser-state';
+
   const markers = document.querySelector<HTMLElement>('#screen-markers');
+  const toggle = document.querySelector<HTMLInputElement>('#screen-markers-toggle');
+  const status = document.querySelector<HTMLElement>('#screen-markers-status');
+  function report(message: string) {
+    if (status) {
+      status.textContent = message;
+      status.hidden = message === '';
+    }
+  }
   if (markers) {
+    let enabled = false;
+    readStorage('local', 'captcha-camera-markers').match(
+      (value) => { enabled = value === 'true'; },
+      () => report('Could not restore the camera marker setting.'),
+    );
+    if (toggle) toggle.checked = enabled;
     function showMarkers() {
       if (!markers) return;
       // Reinsert above modal dialogs so their blurred backdrop cannot cover the markers.
       if (markers.matches(':popover-open')) markers.hidePopover();
-      markers.showPopover();
+      if (enabled) markers.showPopover();
     }
+    toggle?.addEventListener('change', () => {
+      enabled = toggle.checked;
+      showMarkers();
+      writeStorage('local', 'captcha-camera-markers', String(enabled)).match(
+        () => report(''),
+        () => report('Camera markers changed, but the browser could not save the setting.'),
+      );
+    });
     showMarkers();
     const observer = new MutationObserver(showMarkers);
     document.querySelectorAll('dialog').forEach((dialog) => {
