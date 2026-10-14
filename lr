@@ -18,6 +18,59 @@ IMAGE=lerobot
 OUT="$HERE/outputs"
 mkdir -p "$OUT" "$LR_DATA"
 
+# CAMERA=screen: a live screenshot of THIS computer's screen instead of a camera (the CAPTCHA page with its
+# 4 corner markers is on this screen). PowerShell saves outputs/screen_live.jpg ~4x a second while a command runs.
+SCREENCAP=0
+if [ "${CAMERA:-}" = screen ]; then SCREENCAP=1; CAMERA=/work/outputs/screen_live.jpg; fi
+
+stop_screencap() {
+  [ -n "${SCREENCAP_PID:-}" ] || return 0
+  : > "$OUT/.screencap_stop"
+  kill "$SCREENCAP_PID" 2>/dev/null || true
+}
+
+start_screencap() {
+  [ -n "${SCREENCAP_PID:-}" ] && return 0
+  local ps="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+  [ -x "$ps" ] || ps="powershell.exe"
+  local dst stop script
+  dst="$(wslpath -w "$OUT/screen_live.jpg")"
+  stop="$(wslpath -w "$OUT/.screencap_stop")"
+  rm -f "$OUT/screen_live.jpg" "$OUT/.screencap_stop"
+  script=$(cat <<'PSEOF'
+$ErrorActionPreference='SilentlyContinue'
+Add-Type 'using System;using System.Runtime.InteropServices;public class DpiFix{[DllImport("user32.dll")]public static extern bool SetProcessDPIAware();}'
+[DpiFix]::SetProcessDPIAware() | Out-Null
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+$dst='__DST__'; $tmp=$dst+'.tmp.jpg'; $stop='__STOP__'
+$enc=[Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
+$ep=New-Object Drawing.Imaging.EncoderParameters 1
+$ep.Param[0]=New-Object Drawing.Imaging.EncoderParameter([Drawing.Imaging.Encoder]::Quality,[long]92)
+$end=(Get-Date).AddHours(3)
+while (-not (Test-Path $stop) -and (Get-Date) -lt $end) {
+  $r=[Windows.Forms.SystemInformation]::VirtualScreen
+  $b=New-Object Drawing.Bitmap $r.Width,$r.Height
+  $g=[Drawing.Graphics]::FromImage($b)
+  $g.CopyFromScreen($r.Left,$r.Top,0,0,$b.Size)
+  $b.Save($tmp,$enc,$ep); $g.Dispose(); $b.Dispose()
+  Move-Item -Force $tmp $dst
+  Start-Sleep -Milliseconds 250
+}
+Remove-Item -Force $stop
+PSEOF
+)
+  script="${script//__DST__/$dst}"
+  script="${script//__STOP__/$stop}"
+  "$ps" -NoProfile -NonInteractive -EncodedCommand "$(printf '%s' "$script" | iconv -t UTF-16LE | base64 -w0)" \
+    >/dev/null 2>&1 &
+  SCREENCAP_PID=$!
+  trap stop_screencap EXIT
+  local i
+  for i in $(seq 60); do [ -s "$OUT/screen_live.jpg" ] && break; sleep 0.25; done
+  [ -s "$OUT/screen_live.jpg" ] || die "screen capture did not start (PowerShell). Is this WSL on Windows?"
+  say "Camera: live screenshot of this computer's screen (outputs/screen_live.jpg)"
+}
+
 # ---------- helpers ----------
 die() { echo "lr: $*" >&2; exit 1; }
 say() { echo -e "\033[1;34m==>\033[0m $*"; }
@@ -70,6 +123,7 @@ run_hw() {
   need_image
   # shellcheck disable=SC2046
   # shellcheck disable=SC2086
+  [ "$SCREENCAP" = 1 ] && start_screencap
   $RT run --rm -it --privileged -v /dev:/dev -v "$HERE":/repo ${RUN_EXTRA:-} $(common_flags) \
     -e SOLVER_URL -e CLOUDFLARE_ACCOUNT_ID -e CLOUDFLARE_API_TOKEN "$IMAGE" "$@"
 }
@@ -227,6 +281,7 @@ ARM_ARGS() { echo "--port $FOLLOWER_PORT --id $FOLLOWER_ID --robot $ROBOT"; }
 VISION_CAMS() {
   [ "${VISION:-off}" = off ] && { echo none; return; }
   local c="${CAMERA:-}"
+  [ "$SCREENCAP" = 1 ] && c=""
   [ -n "${CAMERA2:-}" ] && c="${c:+$c,}$CAMERA2"
   echo "${c:-none}"
 }
