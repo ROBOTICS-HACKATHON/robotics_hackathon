@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+build/
+dist/
+
+# Secrets / local config (credentials live in env vars, never in the repo)
+.env
+.env.*
+
+# Benchmark and run reports
+bench.json
+report*.json
+*.report.json
+
+# Generated example data: `captchasolver test --pipeline files` writes these.
+# examples/1.png (the hand-picked reference screenshot) stays tracked.
+examples/*.json
+examples/[0-9][0-9][0-9]-*.png
+examples/failed_runs/

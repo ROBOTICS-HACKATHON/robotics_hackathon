@@ -15,53 +15,157 @@ import argparse
 import json
 import time
 
-from common import ScreenModel, connect_follower, load_calib, move_to
+import numpy as np
+
+from common import (ForceGuard, ScreenModel, connect_follower, follow_path, load_calib, move_to,
+                    read_joints, set_torque_limit, settle)
 
 
 class Tapper:
     def __init__(self, port, robot_id="my_follower", robot_type="so101",
-                 lift=0.3, press=0.04, speed=1.0):
+                 lift=0.3, press=0.04, speed=1.0, via_home=True, smooth=0.08, own_path=True, correct=True, dwell=0.25,
+                 max_load=200, torque=100, learned=True):
         """
-        lift:  how far the stylus backs off between taps (0..1, fraction of the way to home)
+        max_load: force guard, how much the motor load may jump on contact (0..1000, 0 = off)
+        torque: cap on shoulder/elbow/wrist strength in percent (100 = normal)
+        dwell: seconds the stylus stays on the screen (longer = more reliable touches)
+        correct: apply the aim correction learned from measured tests (see correction.py)
+        own_path: replay your recorded (smoothed) leader paths if the calibration has them
+        smooth: smoothing strength in seconds (0 = raw recording, 0.15 = very smooth)
+        via_home: go back to the home pose after every tap (stylus never drags across the screen)
+        lift:  how high the stylus hovers right before/after a tap (0..1, fraction of the way to home)
         press: how far past the taught touch point to push (raise if taps don't register)
         speed: >1 faster, <1 slower
         """
         calib = load_calib()
-        self.model = ScreenModel(calib)
-        self.lift, self.press, self.speed = lift, press, speed
+        self.model = ScreenModel(calib, smooth_s=smooth)
+        self.own_path = own_path and self.model.has_paths
+        from correction import Correction, calib_id
+        from learner import Experience, LearnedModel, PressBandit
+        self.exp = Experience(calib_id(calib))
+        self.learned = None
+        if learned and len(self.exp) >= 5 and self.own_path:
+            # the arm's own learned "how to hit (u, v)" replaces the screen-space offset
+            self.learned = LearnedModel(calib, self.exp)
+            self.model.touch_pose = self.learned.touch_pose
+            correct = False
+            press = PressBandit(self.exp).best()
+        self.correction = Correction(calib) if correct else Correction({"points": []})
+        self.last_command = None
+        self.last_touch_q = None
+        self.dwell = dwell
+        self.last_settle_err = None
+        self.last_force_stop, self.last_peak_load, self.last_stop = False, 0.0, None
+        self.lift, self.press, self.speed, self.via_home = lift, press, speed, via_home
         self.robot = connect_follower(port, robot_id, robot_type)
+        self.at_home = False
+        self.guard = ForceGuard(self.robot, limit=max_load)
+        self.torque = torque
+        if torque < 100:
+            set_torque_limit(self.robot, torque)
 
     def __enter__(self):
         return self
 
     def __exit__(self, *exc):
         self.go_home()
+        if self.torque < 100:
+            set_torque_limit(self.robot, 100)
         self.robot.disconnect()
 
-    def go_home(self):
-        move_to(self.robot, self.model.home, 1.5 / self.speed)
+    def go_home(self, seconds=1.5):
+        if not self.at_home:
+            move_to(self.robot, self.model.home, seconds / self.speed)
+            self.at_home = True
 
     def tap(self, u, v):
         if not (0 <= u <= 1 and 0 <= v <= 1):
             raise ValueError(f"({u}, {v}) is outside the screen")
+        u, v = self.correction.aim(u, v)  # aim slightly off to cancel the learned miss
+        self.last_command = (u, v)
         touch = self.model.touch_pose(u, v)
+        if self.own_path:
+            return self._tap_own_path(u, v, touch)
         above = touch + (self.model.home - touch) * self.lift
         pressed = touch + (touch - above) * self.press / max(self.lift, 1e-6)
-        move_to(self.robot, above, 0.8 / self.speed)
-        move_to(self.robot, pressed, 0.35 / self.speed)
+        if self.via_home:
+            self.go_home()  # start every tap from home, above the screen
+        self.at_home = False
+        move_to(self.robot, above, 0.7 / self.speed)    # over the target
+        move_to(self.robot, pressed, 0.35 / self.speed)  # down
         time.sleep(0.12)
-        move_to(self.robot, above, 0.3 / self.speed)
+        move_to(self.robot, above, 0.3 / self.speed)     # straight back up
+        if self.via_home:
+            self.go_home(0.7)                            # and back home before the next one
+
+    def _tap_own_path(self, u, v, touch):
+        """home -> your smoothed path down -> small press -> your smoothed path back up -> home.
+        The force guard stops the push the moment the motors strain against the glass."""
+        self.go_home()
+        self.at_home = False
+        down, t_down = self.model.path("approach", u, v, touch)
+        up, t_up = self.model.path("retreat", u, v, touch)
+        self.last_touch_q = touch
+        g = self.guard
+        g.peak = 0.0
+        # gentle final approach; stops the moment the screen reports the touch (or on too much force)
+        why = follow_path(self.robot, down, 1.3 * t_down / self.speed, slow_end=0.25, guard=g, guard_from=0.6)
+        self.last_settle_err = None
+        if not why:
+            # not touched yet: push a little further, and make sure the stylus really arrives
+            pressed = touch + (touch - down[-8]) * self.press * 4
+            why = follow_path(self.robot, np.array([touch, pressed]), 0.15, guard=g, guard_from=0.0,
+                              reset_guard=False)
+            if not why:
+                self.last_settle_err, why = settle(self.robot, pressed, timeout=self.dwell + 0.8, guard=g)
+        self.last_stop = why
+        self.last_force_stop, self.last_peak_load = why == "force", g.peak
+        # touched already: lift off almost right away (don't keep pressing); otherwise hold for dwell
+        time.sleep(0.05 if why == "touch" else self.dwell)
+        # lift off from wherever the stylus actually is (never re-push to the taught pose)
+        follow_path(self.robot, up, t_up / self.speed, start=read_joints(self.robot))
+        self.at_home = True
+
+    def stop_on_touch(self, server):
+        """While a TouchServer is running (tests, practice), stop pressing as soon as it reports a touch."""
+        self.guard.touch_event = server.touched
+
+    def tap_pose(self, u, v, q):
+        """Tap with an exact joint pose q for screen point (u, v) (used by the learning loop)."""
+        if not self.own_path:
+            raise SystemExit("Learning needs a calibration with recorded paths: run ./lr touch-calib")
+        self._tap_own_path(u, v, np.asarray(q, float))
 
     def tap_many(self, points):
         for u, v in points:
             self.tap(u, v)
 
 
+def measure_summary(results):
+    """Errors between where we aimed and where the page saw the touch."""
+    px = [r["error_px"] for r in results if r.get("error_px") is not None]
+    frac = [r["error_frac"] for r in results if r.get("error_frac") is not None]
+    missed = sum(1 for r in results if not r["touches"])
+    s = {"taps": len(results), "no_touch": missed}
+    if frac:
+        s.update(mean_error_pct=100 * float(np.mean(frac)), max_error_pct=100 * float(np.max(frac)))
+    if px:
+        s.update(mean_error_px=float(np.mean(px)), max_error_px=float(np.max(px)),
+                 within_25px=sum(e <= 25 for e in px), within_50px=sum(e <= 50 for e in px))
+        dx = [r["offset_px"][0] for r in results if r.get("offset_px")]
+        dy = [r["offset_px"][1] for r in results if r.get("offset_px")]
+        s.update(mean_offset_px=[float(np.mean(dx)), float(np.mean(dy))])  # same-direction miss = systematic
+    return s
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("coords", nargs="*", type=float, help="u1 v1 u2 v2 ...")
     p.add_argument("--json", help='list of [u, v] pairs')
-    p.add_argument("--test", action="store_true", help="tap every calibration dot")
+    p.add_argument("--test", action="store_true", help="tap every calibration target and measure")
+    p.add_argument("--random", type=int, default=0, metavar="N", help="tap N random points and measure")
+    p.add_argument("--no-measure", action="store_true", help="tests without the page reporting touches")
+    p.add_argument("--http-port", type=int, default=8765)
     p.add_argument("--home", action="store_true")
     p.add_argument("--port", required=True)
     p.add_argument("--id", default="my_follower")
@@ -69,10 +173,29 @@ if __name__ == "__main__":
     p.add_argument("--press", type=float, default=0.04)
     p.add_argument("--lift", type=float, default=0.3)
     p.add_argument("--speed", type=float, default=1.0)
+    p.add_argument("--no-home", action="store_true", help="don't return home between taps (faster)")
+    p.add_argument("--smooth", type=float, default=0.08, help="path smoothing in seconds (0 = raw)")
+    p.add_argument("--simple-path", action="store_true", help="ignore your recorded paths")
+    p.add_argument("--max-load", type=int, default=200,
+                   help="force guard: stop pushing when motor load jumps this much (0..1000, 0 = off)")
+    p.add_argument("--torque", type=int, default=100, help="cap arm strength in percent while tapping")
+    p.add_argument("--dwell", type=float, default=0.25, help="seconds the stylus stays on the screen")
+    p.add_argument("--no-learned", action="store_true", help="ignore the learned model (use calibration only)")
+    p.add_argument("--no-correct", action="store_true", help="don't apply the learned aim correction")
+    p.add_argument("--no-learn", action="store_true", help="don't update the correction after a test")
     a = p.parse_args()
 
-    if a.test:
+    if a.home:
+        pts = []
+    elif a.test:
         pts = [(d["u"], d["v"]) for d in load_calib()["points"]]
+    elif a.random:
+        # random spots inside the calibrated area (outside it the model has to guess)
+        cal = load_calib()["points"]
+        lo = [min(p["u"] for p in cal), min(p["v"] for p in cal)]
+        hi = [max(p["u"] for p in cal), max(p["v"] for p in cal)]
+        rng = np.random.default_rng()
+        pts = [tuple(x) for x in rng.uniform(lo, hi, size=(a.random, 2)).round(3)]
     elif a.json:
         pts = json.loads(a.json)
     else:
@@ -80,10 +203,92 @@ if __name__ == "__main__":
             raise SystemExit("Give coordinates in u v pairs")
         pts = list(zip(a.coords[::2], a.coords[1::2]))
 
-    with Tapper(a.port, a.id, a.robot, a.lift, a.press, a.speed) as t:
+    srv = None
+    if (a.test or a.random) and not a.no_measure:
+        from touchserver import TouchServer, save_log
+        srv = TouchServer(a.http_port, mode="test", msg="Tap test: blue dots show where the robot touched")
+        print("Reload the page on the touch screen. Starting in 3 s...")
+        time.sleep(3)
+
+    results = []
+    with Tapper(a.port, a.id, a.robot, a.lift, a.press, a.speed, via_home=not a.no_home,
+                smooth=a.smooth, own_path=not a.simple_path, correct=not a.no_correct,
+                dwell=a.dwell, max_load=a.max_load, torque=a.torque, learned=not a.no_learned) as t:
+        print("force guard: " + (f"on (stops at a load jump of {a.max_load})" if t.guard.ok else "OFF"))
+        if srv:
+            t.stop_on_touch(srv)
+            print("stop-on-touch: on (stops pressing the moment the page reports the touch)")
+        print(f"learned model: {len(t.exp)} past touches, press {t.press}" if t.learned else t.correction.describe())
         err = ", ".join(f"{e:.1f}" for e in t.model.fit_error[:5])
         print(f"Calibration fit error per joint (degrees): {err}")
-        if not a.home:
-            for i, (u, v) in enumerate(pts, 1):
-                print(f"tap {i}: u={u:.3f} v={v:.3f}")
-                t.tap(u, v)
+        if t.model.wrist_spread > 5:
+            print(f"WARNING: the wrist angle varied {t.model.wrist_spread:.0f} deg between calibration targets, "
+                  "so taps between targets will miss.\n         Recalibrate: ./lr touch-calib now locks the wrist.")
+        if t.own_path:
+            m = t.model
+            print(f"Replaying your recorded paths: down {m.path_time['approach'] / a.speed:.1f}s, "
+                  f"up {m.path_time['retreat'] / a.speed:.1f}s, shake removed ~{m.shake['approach']:.2f} deg")
+        else:
+            print("Using calculated paths (no recorded paths in the calibration)")
+        for i, (u, v) in enumerate(pts, 1):
+            if srv:
+                srv.set(step=i, target=[u, v], msg=f"Tap {i}/{len(pts)}: aiming at the orange ring")
+                srv.drain()
+            t.tap(u, v)
+            line = f"tap {i}: aim u={u:.3f} v={v:.3f}"
+            if srv:
+                time.sleep(0.3)  # give the page time to report
+                got = srv.all_touches()
+                r = {"target": [u, v], "command": list(t.last_command), "touches": got,
+                     "settle_err_deg": t.last_settle_err, "force_stop": t.last_force_stop,
+                     "peak_load_jump": t.last_peak_load, "stopped_by": t.last_stop}
+                if got and not a.no_learn and t.last_touch_q is not None:
+                    t.exp.add(t.last_touch_q, (got[0]["u"], got[0]["v"]), (u, v), None, t.press, {"source": "test"})
+                if got:
+                    g = got[0]
+                    du, dv = g["u"] - u, g["v"] - v
+                    r["error_frac"] = float(np.hypot(du, dv))
+                    if g.get("w") and g.get("h"):
+                        r["offset_px"] = [du * g["w"], dv * g["h"]]
+                        r["error_px"] = float(np.hypot(*r["offset_px"]))
+                        line += f"  landed u={g['u']:.3f} v={g['v']:.3f}  off by {r['error_px']:.0f}px"
+                    else:
+                        line += f"  landed u={g['u']:.3f} v={g['v']:.3f}"
+                    if len(got) > 1:
+                        line += f"  ({len(got)} touches: bounced or dragged)"
+                else:
+                    se = t.last_settle_err
+                    line += "  NO TOUCH registered" + (" (force guard stopped it: try --max-load 300)" if t.last_force_stop else "") + (
+                        f" (arm stopped {se:.1f} deg short: blocked by the screen or too weak)" if se and se > 1.5
+                        else " (arm reached its pose: press deeper with --press 0.08)")
+                results.append(r)
+            if t.last_force_stop:
+                line += "  [force guard stopped the push]"
+            print(line, flush=True)
+
+    if srv:
+        summ = measure_summary(results)
+        from correction import calib_id, refit_and_save
+        calib = load_calib()
+        log = save_log("test", {"settings": vars(a), "calib_id": calib_id(calib),
+                                "correction": t.correction.model, "summary": summ, "results": results})
+        print("\n== Accuracy ==")
+        if "mean_error_px" in summ:
+            print(f"mean error {summ['mean_error_px']:.0f}px, worst {summ['max_error_px']:.0f}px, "
+                  f"within 25px: {summ['within_25px']}/{summ['taps']}, within 50px: {summ['within_50px']}/{summ['taps']}")
+            ox, oy = summ["mean_offset_px"]
+            print(f"average miss: {abs(ox):.0f}px {'right' if ox >= 0 else 'left'}, "
+                  f"{abs(oy):.0f}px {'down' if oy >= 0 else 'up'}  "
+                  "(if this is most of the error, the misses are systematic: recalibrate)")
+        print(f"taps with no touch: {summ['no_touch']}")
+        print(f"Log saved: {log}")
+        if not a.no_learn:
+            t.exp.save()
+            print(f"\nSaved {len(t.exp)} touches of experience for the learned model.")
+            if not t.learned:
+                print("== Updating aim correction from all tests with this calibration ==")
+                refit_and_save(calib)
+        srv.set(step=0, target=None, msg=(f"Done: mean error {summ['mean_error_px']:.0f}px"
+                                          if "mean_error_px" in summ else "Done"))
+        time.sleep(1.5)
+        srv.stop()

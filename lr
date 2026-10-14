@@ -63,7 +63,8 @@ need_image() {
 run_hw() {
   need_image
   # shellcheck disable=SC2046
-  $RT run --rm -it --privileged -v /dev:/dev -v "$HERE":/repo $(common_flags) "$IMAGE" "$@"
+  # shellcheck disable=SC2086
+  $RT run --rm -it --privileged -v /dev:/dev -v "$HERE":/repo ${RUN_EXTRA:-} $(common_flags) "$IMAGE" "$@"
 }
 
 hf_user() {
@@ -216,15 +217,31 @@ cmd_run() {
 ARM_ARGS() { echo "--port $FOLLOWER_PORT --id $FOLLOWER_ID --robot $ROBOT"; }
 
 cmd_touch-calib() {
-  say "Open touch/calib.html full-screen on the touch screen first."
-  run_hw python /repo/touch/calibrate_screen.py --follower-port "$FOLLOWER_PORT" --leader-port "$LEADER_PORT" \
+  local ip
+  ip=$( (ip route get 1.1.1.1 2>/dev/null || true) | awk '{for(i=1;i<NF;i++) if($i=="src") print $(i+1)}')
+  say "On the touch screen open: http://localhost:8765/  (same computer)  or  http://${ip:-<this-computer-ip>}:8765/"
+  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/calibrate_screen.py --follower-port "$FOLLOWER_PORT" --leader-port "$LEADER_PORT" \
+    --follower-id "$FOLLOWER_ID" --leader-id "$LEADER_ID" --robot "$ROBOT"
+}
+
+cmd_practice() {
+  # shellcheck disable=SC2046
+  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/practice.py $(ARM_ARGS) "$@"
+}
+
+cmd_fit() {
+  run_hw bash -c "cd /repo/touch && python correction.py $*"
+}
+
+cmd_set-home() {
+  run_hw python /repo/touch/set_home.py --follower-port "$FOLLOWER_PORT" --leader-port "$LEADER_PORT" \
     --follower-id "$FOLLOWER_ID" --leader-id "$LEADER_ID" --robot "$ROBOT"
 }
 
 cmd_tap() {
   [ $# -ge 1 ] || die "usage: ./lr tap u v [u v ...] | --test | --home   (u, v from 0 to 1)"
   # shellcheck disable=SC2046
-  run_hw python /repo/touch/tap.py $(ARM_ARGS) "$@"
+  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/tap.py $(ARM_ARGS) "$@"
 }
 
 cmd_see() {
@@ -262,7 +279,11 @@ GPU machine
 
 Touch screen
   touch-calib               Teach the arm 9 dots on touch/calib.html
-  tap u v [u v ...]         Tap screen points (0..1). --test taps the 9 dots, --home parks
+  set-home                  Re-set only the home pose the arm returns to between taps
+  tap u v [u v ...]         Tap screen points (0..1). --home parks the arm
+  tap --test | --random N   Tap the targets / N random points, MEASURE, and update the aim correction
+  practice [--targets N]    Robot teaches itself: retries each target until accurate, learns from every touch
+  fit [--reset]             Refit (or remove) the aim correction from all test logs
   see                       Camera -> straightened screenshot in outputs/screen.jpg
 
   shell                     Open a shell inside the container
@@ -271,7 +292,7 @@ EOF
 
 c="${1:-help}"; shift || true
 case "$c" in
-  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|tap|see)
+  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice)
     "cmd_$c" "$@" ;;
   *) cmd_help; exit 1 ;;
 esac

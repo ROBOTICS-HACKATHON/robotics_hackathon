@@ -3,6 +3,9 @@ outputs/
 .venv/
 lerobot/
 touch/screen_calib.json
+touch/logs/
+touch/screen_correction.json
+touch/experience.json
 node_modules/
 .astro/
 dist/

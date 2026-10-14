@@ -1,8 +1,14 @@
 [tasks.dev]
+dir = "captcha"
 run = "bun run dev"
 
 [tasks.build]
+dir = "captcha"
 run = "bun run build"
 
 [tasks.preview]
+dir = "captcha"
 run = "bun run preview"
+
+[tasks."cad:build"]
+run = "openscad -o cad/print/stylus_mount.stl cad/stylus_mount.scad"
