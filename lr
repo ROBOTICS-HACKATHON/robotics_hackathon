@@ -268,7 +268,8 @@ cmd_see() {
 cmd_tip-test() {
   local cams="${1:-}"
   [ -z "$cams" ] && { cams="${CAMERA:-}"; [ -n "${CAMERA2:-}" ] && cams="${cams:+$cams,}$CAMERA2"; }
-  run_hw python /repo/touch/tipvision.py --cameras "$cams" --color "${TIP_COLOR:-pink}" --out /work/outputs
+  run_hw python /repo/touch/tipvision.py --cameras "$cams" --color "${TIP_COLOR:-pink}" --out /work/outputs \
+    --delay "${DELAY:-5}"
 }
 
 cmd_cam-test() {

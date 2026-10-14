@@ -19,7 +19,7 @@ CAMERA=/dev/video4
 CAMERA2=
 # Camera hover-check before each tap: auto = use CAMERA (+CAMERA2), off = no cameras while tapping
 VISION=off
-# Colour of the sticker near the stylus tip: pink, green, orange or blue
+# Colour of the sticker near the stylus tip: pink, green, orange, yellow or blue
 TIP_COLOR=pink
 
 # Seconds to switch from the terminal to the page before a picture or a tap run starts

@@ -1,6 +1,6 @@
 """Seeing the stylus tip with 0, 1 or 2 cameras.
 
-Put a small bright sticker (pink, green, orange or blue) near the stylus tip.
+Put a small bright sticker (pink, green, orange, yellow or blue) near the stylus tip.
 Each camera finds the screen (corner markers) and the sticker, and projects the
 sticker onto the screen: "where on the screen does this camera see the tip".
 
@@ -40,7 +40,8 @@ MIN_SAMPLES = 5
 COLORS = {
     "pink": [((140, 70, 90), (179, 255, 255)), ((0, 120, 120), (4, 255, 255))],
     "green": [((40, 80, 70), (85, 255, 255))],
-    "orange": [((5, 130, 120), (22, 255, 255))],
+    "orange": [((5, 130, 120), (21, 255, 255))],
+    "yellow": [((22, 110, 120), (36, 255, 255))],
     "blue": [((95, 120, 70), (128, 255, 255))],
 }
 UNIT = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], np.float32)
@@ -264,7 +265,10 @@ if __name__ == "__main__":
     p.add_argument("--cameras", default="", help="'none', one camera, or two separated by a comma")
     p.add_argument("--color", default="pink", choices=sorted(COLORS))
     p.add_argument("--out", default="outputs")
+    p.add_argument("--delay", type=float, default=0, help="seconds to switch to the page before the check")
     a = p.parse_args()
+    from common import countdown
+    countdown(a.delay, "switch to the page with the corner markers (full-screen, F11)")
     v = TipVision(a.cameras, a.color)
     if not v.enabled:
         raise SystemExit("No camera configured (CAMERA / CAMERA2 in lr.conf).")
