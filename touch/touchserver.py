@@ -18,8 +18,9 @@ LOG_DIR = HERE / "logs"
 
 
 class TouchServer:
-    def __init__(self, port=8765, **state):
+    def __init__(self, port=8765, keys=None, **state):
         self.touches = queue.Queue()  # dicts: u, v, w, h (frame size in px), t
+        self.keys = keys if keys is not None else queue.Queue()  # Enter/Space pressed on the page
         self.touched = threading.Event()  # set the moment any touch arrives (used to stop pressing)
         self.state = {"step": 0, "msg": "Starting...", "mode": "calib", **state}
         srv = self
@@ -46,6 +47,9 @@ class TouchServer:
                 self._send(200, f.read_bytes(), mimetypes.guess_type(f.name)[0] or "application/octet-stream")
 
             def do_POST(self):
+                if self.path == "/key":  # Enter/Space on the page = Enter in the terminal
+                    srv.keys.put("page")
+                    return self._send(200, b"{}")
                 if self.path != "/touch":
                     return self._send(404, b"{}")
                 d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")

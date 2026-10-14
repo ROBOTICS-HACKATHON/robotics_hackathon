@@ -7,8 +7,17 @@ LEADER_PORT=/dev/ttyACM1
 FOLLOWER_ID=my_follower
 LEADER_ID=my_leader
 
-# Camera (find the color one with: ./lr cams)
+# Camera: any device works, the screen markers make it position-independent.
+#   USB / RealSense:  CAMERA=/dev/video4          (find the color one with: ./lr cams)
+#   Phone, IP Webcam: CAMERA=ipwebcam:192.168.1.23
+#   Phone, DroidCam:  CAMERA=droidcam:192.168.1.23
+#   Any URL:          CAMERA=http://192.168.1.23:8080/shot.jpg
+# Test it with: ./lr cam-test
 CAMERA=/dev/video4
+
+# Seconds to switch from the terminal to the page before a picture or a tap run starts
+# (page and terminal on the same screen). 0 = start right away.
+DELAY=5
 CAM_WIDTH=640
 CAM_HEIGHT=480
 FPS=30

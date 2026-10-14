@@ -61,6 +61,18 @@ def move_to(robot, target, seconds=1.0, hz=50):
         time.sleep(1 / hz)
 
 
+def countdown(seconds, what="get ready"):
+    """Pause so you can switch windows (page and terminal on the same screen)."""
+    if seconds <= 0:
+        return
+    print(f"Starting in {seconds:.0f} s: {what}", flush=True)
+    end = time.time() + seconds
+    while (left := end - time.time()) > 0:
+        print(f"  {left:3.0f} ...", end="\r", flush=True)
+        time.sleep(min(1, left))
+    print("  go!      ", flush=True)
+
+
 def load_calib(path=CALIB_FILE):
     if not Path(path).exists():
         raise SystemExit(f"No screen calibration at {path}. Run: ./lr touch-calib")

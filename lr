@@ -226,7 +226,7 @@ cmd_touch-calib() {
 
 cmd_practice() {
   # shellcheck disable=SC2046
-  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/practice.py $(ARM_ARGS) "$@"
+  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/practice.py $(ARM_ARGS) --delay "${DELAY:-5}" "$@"
 }
 
 cmd_fit() {
@@ -241,13 +241,18 @@ cmd_set-home() {
 cmd_tap() {
   [ $# -ge 1 ] || die "usage: ./lr tap u v [u v ...] | --test | --home   (u, v from 0 to 1)"
   # shellcheck disable=SC2046
-  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/tap.py $(ARM_ARGS) "$@"
+  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/tap.py $(ARM_ARGS) --delay "${DELAY:-5}" "$@"
 }
 
 cmd_see() {
-  run_hw python /repo/touch/see.py --camera "$CAMERA" --out /work/outputs "$@"
+  run_hw python /repo/touch/see.py --camera "$CAMERA" --out /work/outputs --delay "${DELAY:-5}" "$@"
   if is_wsl && [ -f "$OUT/screen.jpg" ]; then explorer.exe "$(wslpath -w "$OUT/screen.jpg")" || true
   else say "Straightened screen: $OUT/screen.jpg"; fi
+}
+
+cmd_cam-test() {
+  local cam="${1:-$CAMERA}"
+  run_hw python /repo/touch/see.py --camera "$cam" --out /work/outputs --check --delay "${DELAY:-5}"
 }
 
 cmd_shell() { run_hw bash; }
@@ -285,6 +290,7 @@ Touch screen
   practice [--targets N]    Robot teaches itself: retries each target until accurate, learns from every touch
   fit [--reset]             Refit (or remove) the aim correction from all test logs
   see                       Camera -> straightened screenshot in outputs/screen.jpg
+  cam-test [CAMERA]         Test a camera (USB or phone): resolution, speed, markers found
 
   shell                     Open a shell inside the container
 EOF
@@ -292,7 +298,7 @@ EOF
 
 c="${1:-help}"; shift || true
 case "$c" in
-  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice)
+  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice|cam-test)
     "cmd_$c" "$@" ;;
   *) cmd_help; exit 1 ;;
 esac

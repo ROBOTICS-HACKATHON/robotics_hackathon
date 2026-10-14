@@ -10,7 +10,12 @@ Positions on the screen are always **u, v from 0 to 1**: u goes left to right, v
 
 1. **Stylus:** fix a **capacitive stylus** in the gripper (rubber or mesh tip; tape it so it can't slip). A plastic gripper tip won't register on a touch screen.
 2. **Fix everything down:** tape the arm base and the screen to the table. If either one moves, redo step 4.
-3. **Camera:** mount it so it sees the whole screen, including all 4 corner markers, with no glare.
+3. **Camera (any device):** it only has to see the whole screen with all 4 corner markers, no glare.
+   Position, angle, resolution don't matter and nothing is calibrated to it, so you can swap cameras or
+   share one with another team. With a **phone**: install *IP Webcam* (Android) or *DroidCam*
+   (Android/iOS), put the phone on the same Wi-Fi, start the camera in the app, note the address it shows,
+   then in `lr.conf` set e.g. `CAMERA=ipwebcam:192.168.1.23` (or `droidcam:...`, or any snapshot/stream URL)
+   and run `./lr cam-test`. If the arm hides a marker, `see` reuses the last position it saw.
 4. **Teach the screen:** run
    ```bash
    ./lr touch-calib

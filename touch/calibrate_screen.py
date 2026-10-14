@@ -36,7 +36,7 @@ fr = np.linspace(0.15, 0.85, args.grid)
 targets = [(float(u), float(v)) for v in fr for u in fr]  # row by row, like calib.html
 
 keys = queue.Queue()  # lines typed in the terminal
-server = TouchServer(args.http_port, total=len(targets), grid=args.grid, mode="calib")
+server = TouchServer(args.http_port, keys=keys, total=len(targets), grid=args.grid, mode="calib")
 state = server.state
 
 
@@ -95,7 +95,8 @@ def wait_step(step, msg, use_touch, path=None):
     """Mirror the leader until the page reports a touch (or Enter).
     Records every pose into `path`. Returns (pose, (u, v) or None)."""
     state.update(step=step, msg=msg)
-    how = "touch the target (saved automatically) or press Enter" if use_touch else "press Enter"
+    how = ("touch the target (saved automatically) or press Enter" if use_touch
+           else "press Enter (in the terminal, or Enter/Space on the page)")
     print(f">>> {msg}\n    Move with the leader arm, then {how}.", flush=True)
     drain(touches)
     drain(keys)
