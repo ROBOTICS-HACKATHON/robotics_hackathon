@@ -4,3 +4,4 @@ outputs/
 lerobot/
 touch/screen_calib.json
 touch/logs/
+touch/screen_correction.json

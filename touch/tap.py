@@ -22,8 +22,9 @@ from common import ScreenModel, connect_follower, follow_path, load_calib, move_
 
 class Tapper:
     def __init__(self, port, robot_id="my_follower", robot_type="so101",
-                 lift=0.3, press=0.04, speed=1.0, via_home=True, smooth=0.08, own_path=True):
+                 lift=0.3, press=0.04, speed=1.0, via_home=True, smooth=0.08, own_path=True, correct=True):
         """
+        correct: apply the aim correction learned from measured tests (see correction.py)
         own_path: replay your recorded (smoothed) leader paths if the calibration has them
         smooth: smoothing strength in seconds (0 = raw recording, 0.15 = very smooth)
         via_home: go back to the home pose after every tap (stylus never drags across the screen)
@@ -34,6 +35,9 @@ class Tapper:
         calib = load_calib()
         self.model = ScreenModel(calib, smooth_s=smooth)
         self.own_path = own_path and self.model.has_paths
+        from correction import Correction
+        self.correction = Correction(calib) if correct else Correction({"points": []})
+        self.last_command = None
         self.lift, self.press, self.speed, self.via_home = lift, press, speed, via_home
         self.robot = connect_follower(port, robot_id, robot_type)
         self.at_home = False
@@ -53,6 +57,8 @@ class Tapper:
     def tap(self, u, v):
         if not (0 <= u <= 1 and 0 <= v <= 1):
             raise ValueError(f"({u}, {v}) is outside the screen")
+        u, v = self.correction.aim(u, v)  # aim slightly off to cancel the learned miss
+        self.last_command = (u, v)
         touch = self.model.touch_pose(u, v)
         if self.own_path:
             return self._tap_own_path(u, v, touch)
@@ -121,6 +127,8 @@ if __name__ == "__main__":
     p.add_argument("--no-home", action="store_true", help="don't return home between taps (faster)")
     p.add_argument("--smooth", type=float, default=0.08, help="path smoothing in seconds (0 = raw)")
     p.add_argument("--simple-path", action="store_true", help="ignore your recorded paths")
+    p.add_argument("--no-correct", action="store_true", help="don't apply the learned aim correction")
+    p.add_argument("--no-learn", action="store_true", help="don't update the correction after a test")
     a = p.parse_args()
 
     if a.home:
@@ -146,7 +154,8 @@ if __name__ == "__main__":
 
     results = []
     with Tapper(a.port, a.id, a.robot, a.lift, a.press, a.speed, via_home=not a.no_home,
-                smooth=a.smooth, own_path=not a.simple_path) as t:
+                smooth=a.smooth, own_path=not a.simple_path, correct=not a.no_correct) as t:
+        print(t.correction.describe())
         err = ", ".join(f"{e:.1f}" for e in t.model.fit_error[:5])
         print(f"Calibration fit error per joint (degrees): {err}")
         if t.own_path:
@@ -164,7 +173,7 @@ if __name__ == "__main__":
             if srv:
                 time.sleep(0.3)  # give the page time to report
                 got = srv.all_touches()
-                r = {"target": [u, v], "touches": got}
+                r = {"target": [u, v], "command": list(t.last_command), "touches": got}
                 if got:
                     g = got[0]
                     du, dv = g["u"] - u, g["v"] - v
@@ -184,7 +193,10 @@ if __name__ == "__main__":
 
     if srv:
         summ = measure_summary(results)
-        log = save_log("test", {"settings": vars(a), "summary": summ, "results": results})
+        from correction import calib_id, refit_and_save
+        calib = load_calib()
+        log = save_log("test", {"settings": vars(a), "calib_id": calib_id(calib),
+                                "correction": t.correction.model, "summary": summ, "results": results})
         print("\n== Accuracy ==")
         if "mean_error_px" in summ:
             print(f"mean error {summ['mean_error_px']:.0f}px, worst {summ['max_error_px']:.0f}px, "
@@ -195,6 +207,9 @@ if __name__ == "__main__":
                   "(if this is most of the error, the misses are systematic: recalibrate)")
         print(f"taps with no touch: {summ['no_touch']}")
         print(f"Log saved: {log}")
+        if not a.no_learn:
+            print("\n== Updating aim correction from all tests with this calibration ==")
+            refit_and_save(calib)
         srv.set(step=0, target=None, msg=(f"Done: mean error {summ['mean_error_px']:.0f}px"
                                           if "mean_error_px" in summ else "Done"))
         time.sleep(1.5)

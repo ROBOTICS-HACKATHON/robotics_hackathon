@@ -224,6 +224,10 @@ cmd_touch-calib() {
     --follower-id "$FOLLOWER_ID" --leader-id "$LEADER_ID" --robot "$ROBOT"
 }
 
+cmd_fit() {
+  run_hw bash -c "cd /repo/touch && python correction.py $*"
+}
+
 cmd_set-home() {
   run_hw python /repo/touch/set_home.py --follower-port "$FOLLOWER_PORT" --leader-port "$LEADER_PORT" \
     --follower-id "$FOLLOWER_ID" --leader-id "$LEADER_ID" --robot "$ROBOT"
@@ -272,7 +276,8 @@ Touch screen
   touch-calib               Teach the arm 9 dots on touch/calib.html
   set-home                  Re-set only the home pose the arm returns to between taps
   tap u v [u v ...]         Tap screen points (0..1). --home parks the arm
-  tap --test | --random N   Tap the targets / N random points and MEASURE where they land
+  tap --test | --random N   Tap the targets / N random points, MEASURE, and update the aim correction
+  fit [--reset]             Refit (or remove) the aim correction from all test logs
   see                       Camera -> straightened screenshot in outputs/screen.jpg
 
   shell                     Open a shell inside the container
@@ -281,7 +286,7 @@ EOF
 
 c="${1:-help}"; shift || true
 case "$c" in
-  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see)
+  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit)
     "cmd_$c" "$@" ;;
   *) cmd_help; exit 1 ;;
 esac

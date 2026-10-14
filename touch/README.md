@@ -29,6 +29,12 @@ Positions on the screen are always **u, v from 0 to 1**: u goes left to right, v
    mean and worst error in pixels, how many taps landed within 25 and 50 px, and the average miss direction.
    If most of the error is in one direction, the misses are systematic: recalibrate. If it's scattered, it's noise.
 
+**Self-correcting aim:** after every measured test, the robot learns its systematic miss (shift, stretch,
+bend) from all tests made with the current calibration, and aims slightly off to cancel it. Just repeat
+`./lr tap --random 20` a couple of times; each run prints the expected miss before and after correction.
+`./lr fit` refits by hand, `./lr fit --reset` removes it, `--no-correct` taps without it. Recalibrating
+starts a fresh correction automatically.
+
 **Logs:** every calibration and test run is saved to `touch/logs/` (`calib_<time>.json`, `test_<time>.json`)
 with all touches, so you can compare runs (e.g. different `--smooth` or `--speed`).
 
