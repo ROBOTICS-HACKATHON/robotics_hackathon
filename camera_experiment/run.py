@@ -35,6 +35,7 @@ from camera_experiment.geometry import (
     map_points,
     rectify,
 )
+from camera_experiment.pose import estimate_pose
 
 T = TypeVar("T")
 Record = dict[str, object]
@@ -197,6 +198,8 @@ async def process(path: Path, variant: str, args: Options) -> Result[Record, Fai
                       "screen_size": [args.width, args.height], "screen_quad": screen.quad.tolist(),
                       "photo_to_screen": screen.photo_to_screen.tolist(),
                       "screen_to_photo": screen.screen_to_photo.tolist(), "metric_pose": "uncalibrated"}
+    pose = estimate_pose(path, (frame.shape[1], frame.shape[0]), args.width / args.height, screen.quad)
+    record["pose_estimate"] = pose.value if isinstance(pose, Ok) else pose.context_msg
     for name, image in (("photo.jpg", frame), ("screen.png", screen.image)):
         saved = save_image(folder / name, image)
         if isinstance(saved, Err):
