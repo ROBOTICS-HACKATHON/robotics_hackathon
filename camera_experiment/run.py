@@ -8,8 +8,7 @@ import io
 import json
 import os
 import sys
-from collections.abc import Awaitable, Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal, TypeVar, cast
 
@@ -25,13 +24,14 @@ from captchasolver.screen import (
     read_target,
 )
 from PIL import Image
-from typed_errs import Err, Ok, Result
+from typed_errs import Err, Nothing, Ok, Option, Result, Some
 
 from camera_experiment.geometry import (
     Failure,
     Frame,
     Matrix,
     Screen,
+    async_attempt,
     attempt,
     identify,
     map_points,
@@ -39,6 +39,7 @@ from camera_experiment.geometry import (
     rectify,
 )
 from camera_experiment.pose import estimate_pose
+from camera_experiment.remote import grid_tiles
 
 T = TypeVar("T")
 Record = dict[str, object]
@@ -57,6 +58,7 @@ class Options:
     model: str
     frame: Literal["auto", "markers", "display"] = "auto"
     auto_marker_aspect: bool = True
+    endpoint: Option[str] = field(default_factory=Nothing)
 
 
 def degrade(frame: Frame, variant: str, seed: int) -> Result[Frame, Failure]:
@@ -140,26 +142,25 @@ def png(image: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
-async def async_attempt(label: str, operation: Callable[[], Awaitable[T]]) -> Result[T, Failure]:
-    try:
-        return Ok(await operation())
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        return Err(Failure.INTERRUPTED, context_msg=f"{label}: interrupted")
-    except Exception as error:  # noqa: BLE001 - async third-party operation boundary
-        return Err(Failure.OPERATION, context_msg=f"{label}: {type(error).__name__}: {error}")
+async def solve(screen: Screen, layout: Layout, model: str,
+                endpoint: Option[str] = Nothing()) -> Result[Record, Failure]:
+    outcome = await async_attempt("captcha solve", lambda: _solve(screen, layout, model, endpoint))
+    return outcome.value if isinstance(outcome, Ok) else outcome
 
 
-async def solve(screen: Screen, layout: Layout, model: str) -> Result[Record, Failure]:
-    return await async_attempt("Workers AI solve", lambda: _solve(screen, layout, model))
-
-
-async def _solve(screen: Screen, layout: Layout, model: str) -> Record:
+async def _solve(screen: Screen, layout: Layout, model: str, endpoint: Option[str]) -> Result[Record, Failure]:
     async with WorkersAI(concurrency=3) as ai:
         image = Image.fromarray(cv2.cvtColor(screen.image, cv2.COLOR_BGR2RGB))
         target = await read_target(ai, image, layout, model=model)
         x, y, w, h = layout.grid
-        tiles = await solve_grid(ai, png(image.crop((x, y, x + w, y + h))), target,
-                                 mode="ask", model=model)
+        crop = png(image.crop((x, y, x + w, y + h)))
+        if isinstance(endpoint, Some):
+            remote = await grid_tiles(endpoint.value, crop, target, model)
+            if isinstance(remote, Err):
+                return remote
+            tiles = remote.value
+        else:
+            tiles = await solve_grid(ai, crop, target, mode="ask", model=model)
     width, height = image.size
     centers = tile_centers((w, h), 3, 3)
     clicks = [[x + centers[t][0], y + centers[t][1]] for t in tiles]
@@ -170,7 +171,8 @@ async def _solve(screen: Screen, layout: Layout, model: str) -> Record:
               "verify_norm": [round(verify[0] / width, 6), round(verify[1] / height, 6)]
               if verify else None}
     result["actions"] = build_actions(result)
-    return cast(Record, result)
+    result["tile_solver"] = endpoint.value if isinstance(endpoint, Some) else "Workers AI direct"
+    return Ok(result)
 
 
 def target_points(layout: Layout, size: tuple[int, int]) -> Result[list[Record], Failure]:
@@ -309,7 +311,7 @@ async def process(path: Path, variant: str, args: Options) -> Result[Record, Fai
         crop = save_image(folder / "challenge.png", screen.image[y:bottom, x:x + w])
         if isinstance(crop, Err):
             return crop
-        solved: Result[Record, Failure] = (await solve(screen, found, args.model) if args.solve
+        solved: Result[Record, Failure] = (await solve(screen, found, args.model, args.endpoint) if args.solve
                                          else Ok[Record]({"status": "not_requested"}))
         if isinstance(solved, Err):
             if solved.error == Failure.INTERRUPTED:

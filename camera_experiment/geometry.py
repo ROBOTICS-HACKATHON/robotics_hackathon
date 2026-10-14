@@ -1,7 +1,8 @@
 """Locate a bright laptop display and normalize its perspective from pixels."""
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Literal, TypeVar, cast
@@ -31,6 +32,16 @@ def attempt(label: str, operation: Callable[[], T]) -> Result[T, Failure]:
     except KeyboardInterrupt:
         return Err(Failure.INTERRUPTED, context_msg=f"{label}: interrupted")
     except Exception as error:  # noqa: BLE001 - third-party operation boundary
+        return Err(Failure.OPERATION, context_msg=f"{label}: {type(error).__name__}: {error}")
+
+
+async def async_attempt(label: str, operation: Callable[[], Awaitable[T]]) -> Result[T, Failure]:
+    """Keep asynchronous service failures at their external boundary."""
+    try:
+        return Ok(await operation())
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        return Err(Failure.INTERRUPTED, context_msg=f"{label}: interrupted")
+    except Exception as error:  # noqa: BLE001 - async third-party operation boundary
         return Err(Failure.OPERATION, context_msg=f"{label}: {type(error).__name__}: {error}")
 
 
