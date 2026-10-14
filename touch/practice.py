@@ -34,6 +34,8 @@ p.add_argument("--cameras", default="", help="tip vision cameras: 'none', one, o
 p.add_argument("--tip-color", default="pink")
 p.add_argument("--screen-mm", type=float, default=300.0, help="marker-to-marker screen width (for mm heights)")
 p.add_argument("--delay", type=float, default=5, help="seconds to switch to the page before starting")
+p.add_argument("--tap-from", type=float, default=0.85,
+               help="stop on your recorded path this far down (0..1), then go straight down: lower = longer straight tap")
 a = p.parse_args()
 
 calib = load_calib()
@@ -52,7 +54,7 @@ if a.cameras:
     from tipvision import TipVision
     vision = TipVision(a.cameras, a.tip_color, width_mm=a.screen_mm, cid=calib_id(calib))
 with Tapper(a.port, a.id, a.robot, speed=a.speed, max_load=a.max_load, correct=False, learned=False,
-            vision=vision) as t:
+            vision=vision, tap_from=a.tap_from) as t:
     if vision is not None:
         print(vision.describe())
     t.stop_on_touch(srv)  # stop pressing the moment the page reports the touch

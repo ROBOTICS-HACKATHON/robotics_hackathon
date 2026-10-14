@@ -24,7 +24,8 @@ from common import (ForceGuard, SafetyEnvelope, countdown, ScreenModel, connect_
 class Tapper:
     def __init__(self, port, robot_id="my_follower", robot_type="so101",
                  lift=0.3, press=0.04, speed=1.0, via_home=True, smooth=0.08, own_path=True, correct=True, dwell=0.25,
-                 max_load=0, torque=100, learned=True, vision=None, hover=0.15, vision_gain=0.8, servo=True):
+                 max_load=0, torque=100, learned=True, vision=None, hover=0.15, vision_gain=0.8, servo=True,
+                 tap_from=0.85):
         """
         vision: a TipVision (0, 1 or 2 cameras); hover-check before each tap when it has learned enough
         hover: how high to hover for the check (fraction of the way from the touch pose to home)
@@ -59,6 +60,7 @@ class Tapper:
         self.last_command = None
         self.last_touch_q = None
         self.vision, self.hover_frac, self.vision_gain = vision, hover, vision_gain
+        self.tap_from = tap_from  # where on your recorded path down it stops above the target (0.85 = last 15% is the tap)
         # 2 cameras: steer the tip onto the target in mm, learning from the arm's own moves (servo.py)
         self.servo = None
         if servo and vision is not None and getattr(vision, "n", 0) >= 2:
@@ -159,9 +161,18 @@ class Tapper:
             approach_dir = touch - (touch + (self.model.home - touch) * self.hover_frac)
             self.last_touch_q = touch
         else:
-            # gentle final approach; stops the moment the screen reports the touch (or on too much force)
-            why = follow_path(self.robot, down, 1.3 * t_down / self.speed, slow_end=0.25, guard=g, guard_from=0.6)
-            approach_dir = (touch - down[-8]) * 4
+            # TAP, not drag: your path down to just above the target, STOP there (the arm catches up, no
+            # sideways speed left), then straight down onto the target. Never arrives while still moving sideways.
+            k = int(self.tap_from * (len(down) - 1))
+            hover = down[k]
+            self.last_hover_q = hover
+            why = follow_path(self.robot, down[:k + 1], self.tap_from * t_down / self.speed, guard=g, guard_from=1.1)
+            if not why:
+                why = settle(self.robot, hover, timeout=0.6, guard=g)[1]
+            if not why:
+                why = follow_path(self.robot, np.array([hover, touch]), max(0.5, 0.35 * t_down) / self.speed,
+                                  guard=g, guard_from=0.3)
+            approach_dir = (touch - hover) * (0.4 / max(1e-6, 1 - self.tap_from))  # same press depth as before
         self.last_settle_err = None
         if not why:
             # not touched yet: push a little further, and make sure the stylus really arrives
@@ -185,7 +196,10 @@ class Tapper:
             why_wait = 0.05 if why == "touch" else self.dwell
         # touched already: lift off almost right away (don't keep pressing); otherwise hold for dwell
         time.sleep(why_wait)
-        # lift off from wherever the stylus actually is (never re-push to the taught pose)
+        # lift STRAIGHT back up the line it came down (no sliding on the glass), then your path home
+        lift_to = self.last_hover_q if self.last_hover_q is not None else touch + (self.model.home - touch) * self.hover_frac
+        follow_path(self.robot, np.array([read_joints(self.robot), lift_to]), 0.35 / self.speed)
+        settle(self.robot, lift_to, timeout=0.3)
         follow_path(self.robot, up, t_up / self.speed, start=read_joints(self.robot))
         self.at_home = True
 
@@ -276,6 +290,8 @@ if __name__ == "__main__":
                    help="force guard: stop pushing when motor load jumps this much (0..1000, 0 = off)")
     p.add_argument("--torque", type=int, default=100, help="cap arm strength in percent while tapping")
     p.add_argument("--dwell", type=float, default=0.25, help="seconds the stylus stays on the screen")
+    p.add_argument("--tap-from", type=float, default=0.85,
+                   help="stop on your recorded path this far down (0..1), then go straight down onto the target")
     p.add_argument("--cameras", default="", help="tip vision cameras: 'none', one, or two comma-separated")
     p.add_argument("--tip-color", default="pink")
     p.add_argument("--screen-mm", type=float, default=300.0, help="marker-to-marker screen width (for mm heights)")
@@ -315,7 +331,7 @@ if __name__ == "__main__":
         from correction import calib_id as _cid
         from tipvision import TipVision
         vision = TipVision(a.cameras, a.tip_color, width_mm=a.screen_mm, cid=_cid(load_calib()))
-    with Tapper(a.port, a.id, a.robot, a.lift, a.press, a.speed, via_home=not a.no_home,
+    with Tapper(a.port, a.id, a.robot, a.lift, a.press, a.speed, via_home=not a.no_home, tap_from=a.tap_from,
                 smooth=a.smooth, own_path=not a.simple_path, correct=not a.no_correct,
                 dwell=a.dwell, max_load=a.max_load, torque=a.torque, learned=not a.no_learned,
                 vision=vision) as t:
