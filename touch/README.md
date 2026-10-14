@@ -11,11 +11,13 @@ Positions on the screen are always **u, v from 0 to 1**: u goes left to right, v
 1. **Stylus:** fix a **capacitive stylus** in the gripper (rubber or mesh tip; tape it so it can't slip). A plastic gripper tip won't register on a touch screen.
 2. **Fix everything down:** tape the arm base and the screen to the table. If either one moves, redo step 4.
 3. **Camera:** mount it so it sees the whole screen, including all 4 corner markers, with no glare.
-4. **Teach the screen:** open `touch/calib.html` full-screen (F11) on the touch screen, then run:
+4. **Teach the screen:** run
    ```bash
    ./lr touch-calib
    ```
-   Use the leader arm to drive the stylus to **home** (a few cm above the screen's middle), press Enter, then **lightly touch dots 1–9**, pressing Enter at each one.
+   On the touch screen, open the address it prints (`http://localhost:8765/` when the touch screen is plugged into this computer) full-screen (F11).
+   Use the leader arm to hold the stylus a few cm **above** the middle of the screen (home) and press Enter. Then touch the **highlighted target** each time.
+   Each touch is saved automatically with the exact spot where the stylus landed. Touches outside the highlighted target are ignored.
 5. **Check:**
    ```bash
    ./lr tap --test
