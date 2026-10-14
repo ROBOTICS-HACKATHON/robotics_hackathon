@@ -2,3 +2,4 @@ lr.conf
 outputs/
 .venv/
 lerobot/
+touch/screen_calib.json

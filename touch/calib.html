@@ -1,0 +1,39 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Screen calibration</title>
+<style>
+  html,body{margin:0;height:100%;background:#fff;font-family:system-ui,sans-serif;overflow:hidden}
+  /* frame = rectangle between the markers' outer corners (INSET in markers.js) */
+  #frame{position:fixed;inset:18px}
+  .dot{position:absolute;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;
+       border:3px solid #e33;box-sizing:border-box;display:grid;place-items:center;
+       font-weight:700;color:#e33;font-size:18px}
+  .dot::after{content:"";position:absolute;width:6px;height:6px;border-radius:50%;background:#e33}
+  .dot span{position:absolute;top:-28px}
+  .dot.hit{background:#e33;color:#fff}
+  #msg{position:fixed;left:50%;bottom:30%;transform:translateX(-50%);color:#555}
+</style></head>
+<body>
+<div id="frame"></div>
+<div id="msg">Go full-screen (F11). Teach the arm dots 1–9 in order. Dots turn red when touched.</div>
+<script src="markers.js"></script>
+<script>
+  const n = Number(new URLSearchParams(location.search).get("grid") || 3);
+  const f = document.getElementById("frame");
+  const fr = [...Array(n)].map((_, i) => 0.15 + 0.7 * i / (n - 1));
+  let k = 0;
+  for (const v of fr) for (const u of fr) {
+    const d = document.createElement("div");
+    d.className = "dot"; d.style.left = u * 100 + "%"; d.style.top = v * 100 + "%";
+    d.innerHTML = `<span>${++k}</span>`;
+    f.appendChild(d);
+  }
+  // Show where touches land, handy for checking accuracy
+  addEventListener("pointerdown", e => {
+    const r = f.getBoundingClientRect();
+    const u = (e.clientX - r.left) / r.width, v = (e.clientY - r.top) / r.height;
+    document.getElementById("msg").textContent = `touch at u=${u.toFixed(3)} v=${v.toFixed(3)}`;
+    const t = e.target.closest(".dot"); if (t) t.classList.add("hit");
+  });
+</script>
+</body></html>
