@@ -488,7 +488,7 @@ const sessionSet = (k, v) => { try { v === null ? sessionStorage.removeItem(k) :
 async function initTests() {
   try {
     const h = await api("/api/health");
-    $("t-url").replaceChildren(...h.allowed_hosts.map((host) => el("option", { value: `https://${host}/`, text: host })));
+    $("t-url").replaceChildren(...h.allowed_hosts.map((host) => el("option", { value: `https://${host}/training/`, text: host })));
     $("t-count").max = h.limits.max_count; $("t-conc").max = h.limits.max_concurrency;
   } catch {}
   $("t-start").onclick = startRun;

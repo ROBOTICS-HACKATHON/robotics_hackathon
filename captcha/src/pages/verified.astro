@@ -23,7 +23,7 @@ import Page from '../layouts/Page.astro';
     if (saved.isErr()) {
       report('The browser cannot read the saved result. Enable storage for this site, then reload.');
     } else if (saved.value !== 'image' && saved.value !== 'slider' && saved.value !== 'turnstile') {
-      navigate('/', true).match(() => {}, () => report('No verified result is saved. Open the home page to start again.'));
+      navigate('/training/', true).match(() => {}, () => report('No verified result is saved. Open Training to start again.'));
     } else {
       const kind = saved.value;
       const label = document.querySelector('#solved-kind');
@@ -56,7 +56,7 @@ import Page from '../layouts/Page.astro';
       const cleared = removeStorage('session', 'captcha-solved')
         .andThen(() => removeStorage('session', 'captcha-session-total'));
       if (cleared.isErr()) { report('Could not clear the saved result. Enable site storage, then select Start again.'); return; }
-      navigate('/', true).match(() => {}, () => report('Could not open the home page. Reload to start again.'));
+      navigate('/training/', true).match(() => {}, () => report('Could not open Training. Reload to start again.'));
     });
   </script>
   <style>

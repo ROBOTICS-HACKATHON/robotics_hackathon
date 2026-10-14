@@ -11,6 +11,11 @@ mise run dev
 
 Open http://localhost:4321. Build with `mise run build`.
 
+The main page is the Minesweeper verification demo. It shows the board for two
+seconds before opening the human check. `/demo/` also opens this demo.
+Use `/training/` for the challenge picker, practice settings, and training sessions.
+Point automated solver runs at `https://skibidisigma67rizz.pages.dev/training/`.
+
 Enable "Camera markers" to show the four corner ArUco markers. They are off by
 default, and the browser remembers the setting across reloads and the result page.
 They reuse `touch/markers/aruco_0.png` through `aruco_3.png`

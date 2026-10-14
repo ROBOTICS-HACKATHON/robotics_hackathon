@@ -11,8 +11,8 @@ const { demo = false } = Astro.props;
 <Page title={demo ? 'Minesweeper · CAPTCHA demo' : 'Human verification'}>
   {demo ? <Minesweeper /> : <main class="selection">
     <section class="single-challenge">
-    <h1>Access website</h1>
-    <p class="muted">Local robot demo. Choose a verification challenge.</p>
+    <h1>Training playground</h1>
+    <p class="muted">Choose a challenge or run a training session.</p>
     <div class="choices">
       <button class="choice" data-challenge="image"><strong>reCAPTCHA</strong><span>Image grid</span><span aria-hidden="true">→</span></button>
       <button class="choice" data-challenge="slider"><strong>GeeTest slider</strong><span>Slide the piece into the gap.</span><span aria-hidden="true">→</span></button>
@@ -295,7 +295,7 @@ const { demo = false } = Astro.props;
         complete = true;
         demo.dataset.verified = 'true';
         const status = demo.querySelector<HTMLElement>('[role="status"]');
-        if (status) status.textContent = 'Verification complete. Enjoy Minesweeper!';
+        if (status) status.textContent = 'Verification complete. Demo unlocked.';
         dialog?.close();
         demo.querySelector<HTMLButtonElement>('#demo-restart')?.focus();
         return;
@@ -430,13 +430,17 @@ const { demo = false } = Astro.props;
       if (detail.state === 'success' && detail.kind === kind) finish();
     });
     if (demo) {
+      let introTimer: number | undefined;
+      let introPending = true;
       function startDemo() {
+        introPending = false;
+        window.clearTimeout(introTimer);
         if (pending || dialog?.open) return;
         complete = false;
         if (demo) {
           demo.dataset.verified = 'false';
           const status = demo.querySelector<HTMLElement>('[role="status"]');
-          if (status) status.textContent = 'One quick human check before you play.';
+          if (status) status.textContent = 'Complete the human check to unlock the demo.';
         }
         void launchChallenge('image', 0);
       }
@@ -444,12 +448,20 @@ const { demo = false } = Astro.props;
       demo.querySelectorAll('.mine-cell').forEach((cell) => {
         cell.addEventListener('click', () => { if (!complete) startDemo(); });
       });
-      startDemo();
+      function scheduleDemo() {
+        window.requestAnimationFrame(() => {
+          if (introPending) introTimer = window.setTimeout(startDemo, 2000);
+        });
+      }
+      if (document.readyState === 'complete') scheduleDemo();
+      else window.addEventListener('load', scheduleDemo, { once: true });
+      window.addEventListener('pagehide', () => window.clearTimeout(introTimer));
+      window.addEventListener('pageshow', (event) => {
+        if (event.persisted && introPending) scheduleDemo();
+      });
     }
   </script>
   <style>
-    .site-header { display: flex; justify-content: space-between; gap: 20px; padding: 24px 36px; border-bottom: 1px solid var(--line); font-size: .85rem; }
-    .site-header a { text-decoration: none; font-weight: 600; }
     .selection { display: grid; grid-template-columns: minmax(0, 592px) 280px; gap: 64px; max-width: 984px; margin: 8vh auto; padding: 0 24px; align-items: start; }
     .session-panel { border-left: 1px solid var(--line); padding-left: 24px; }
     .session-panel h2 { margin: 0; font-size: 1.2rem; }

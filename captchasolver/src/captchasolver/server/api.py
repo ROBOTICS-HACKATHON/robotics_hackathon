@@ -173,7 +173,7 @@ class TestParams(BaseModel):
     viewport: str = "1914x1080"
     dpr: float = Field(1.0, ge=1.0, le=3.0)
     model: str = VLM_MODEL
-    url: str = f"https://{DEFAULT_HOSTS.split(',')[0]}/"
+    url: str = f"https://{DEFAULT_HOSTS.split(',')[0]}/training/"
 
 
 class PreflightParams(BaseModel):
@@ -230,7 +230,7 @@ async def _chromium_selftest(stress: bool) -> dict:
                     c = await browser.new_context(viewport={"width": 1914, "height": 1080})
                     try:
                         p = await c.new_page()
-                        await _open_image_challenge(p, f"https://{host}/", i)
+                        await _open_image_challenge(p, f"https://{host}/training/", i)
                         for _ in range(3):
                             await p.screenshot()
                     finally:
