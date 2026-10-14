@@ -1,0 +1,12 @@
+{
+  "PXL_20261014_142052339.jpg": {"visible": false, "target": "", "tiles": []},
+  "PXL_20261014_142056336.jpg": {"visible": true, "target": "cars", "tiles": [1, 7, 8]},
+  "PXL_20261014_142059383.jpg": {"visible": true, "target": "cars", "tiles": [1, 7, 8]},
+  "PXL_20261014_142109412.jpg": {"visible": false, "target": "", "tiles": []},
+  "PXL_20261014_142116069.jpg": {"visible": true, "target": "cars", "tiles": [1, 3, 6]},
+  "PXL_20261014_142127172.jpg": {"visible": false, "target": "", "tiles": []},
+  "PXL_20261014_142127317.jpg": {"visible": false, "target": "", "tiles": []},
+  "PXL_20261014_142133269.jpg": {"visible": true, "target": "bicycles", "tiles": [1]},
+  "PXL_20261014_142148735.jpg": {"visible": false, "target": "", "tiles": []},
+  "PXL_20261014_142153737.jpg": {"visible": true, "target": "dogs", "tiles": [0, 4, 7]}
+}

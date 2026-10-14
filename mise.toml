@@ -12,3 +12,11 @@ run = "bun run preview"
 
 [tasks."cad:build"]
 run = "openscad -o cad/print/stylus_mount.stl cad/stylus_mount.scad"
+
+[tasks."camera:compare"]
+env = { PYTHONDONTWRITEBYTECODE = "1" }
+run = "camera_experiment/.venv/bin/python -m camera_experiment.run"
+
+[tasks."camera:report"]
+env = { PYTHONDONTWRITEBYTECODE = "1" }
+run = "camera_experiment/.venv/bin/python -m camera_experiment.compare"

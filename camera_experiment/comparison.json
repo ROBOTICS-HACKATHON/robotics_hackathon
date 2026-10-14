@@ -1,0 +1,1475 @@
+{
+  "label_source": "human inspection of supplied photos; tile 0 of dogs is partly occluded by debug labels",
+  "groups": {
+    "results-live/original": {
+      "model": "@cf/google/gemma-4-26b-a4b-it",
+      "cases": 10,
+      "visible": 5,
+      "layouts": 5,
+      "plans": 5,
+      "exact": 4,
+      "valid_coordinates": 5,
+      "correct_absence": 5,
+      "geometry_errors": 0
+    },
+    "results-live/blur": {
+      "model": "@cf/google/gemma-4-26b-a4b-it",
+      "cases": 10,
+      "visible": 5,
+      "layouts": 5,
+      "plans": 5,
+      "exact": 4,
+      "valid_coordinates": 5,
+      "correct_absence": 5,
+      "geometry_errors": 0
+    },
+    "results-live/jpeg": {
+      "model": "@cf/google/gemma-4-26b-a4b-it",
+      "cases": 10,
+      "visible": 5,
+      "layouts": 5,
+      "plans": 5,
+      "exact": 3,
+      "valid_coordinates": 5,
+      "correct_absence": 5,
+      "geometry_errors": 0
+    },
+    "results-live/lowres": {
+      "model": "@cf/google/gemma-4-26b-a4b-it",
+      "cases": 10,
+      "visible": 5,
+      "layouts": 5,
+      "plans": 5,
+      "exact": 3,
+      "valid_coordinates": 5,
+      "correct_absence": 5,
+      "geometry_errors": 0
+    },
+    "results-live/noise": {
+      "model": "@cf/google/gemma-4-26b-a4b-it",
+      "cases": 10,
+      "visible": 5,
+      "layouts": 5,
+      "plans": 5,
+      "exact": 3,
+      "valid_coordinates": 5,
+      "correct_absence": 5,
+      "geometry_errors": 0
+    },
+    "results-live/dark": {
+      "model": "@cf/google/gemma-4-26b-a4b-it",
+      "cases": 10,
+      "visible": 5,
+      "layouts": 5,
+      "plans": 5,
+      "exact": 4,
+      "valid_coordinates": 5,
+      "correct_absence": 5,
+      "geometry_errors": 0
+    },
+    "results-live/combined": {
+      "model": "@cf/google/gemma-4-26b-a4b-it",
+      "cases": 10,
+      "visible": 5,
+      "layouts": 2,
+      "plans": 2,
+      "exact": 0,
+      "valid_coordinates": 2,
+      "correct_absence": 5,
+      "geometry_errors": 1
+    },
+    "results-mistral/original": {
+      "model": "@cf/mistralai/mistral-small-3.1-24b-instruct",
+      "cases": 10,
+      "visible": 5,
+      "layouts": 5,
+      "plans": 5,
+      "exact": 4,
+      "valid_coordinates": 5,
+      "correct_absence": 5,
+      "geometry_errors": 0
+    },
+    "results-mistral/combined": {
+      "model": "@cf/mistralai/mistral-small-3.1-24b-instruct",
+      "cases": 10,
+      "visible": 5,
+      "layouts": 2,
+      "plans": 2,
+      "exact": 0,
+      "valid_coordinates": 2,
+      "correct_absence": 5,
+      "geometry_errors": 1
+    }
+  },
+  "records": [
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142052339.jpg",
+      "variant": "original",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142052339.jpg",
+      "variant": "blur",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142052339.jpg",
+      "variant": "jpeg",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142052339.jpg",
+      "variant": "lowres",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142052339.jpg",
+      "variant": "noise",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142052339.jpg",
+      "variant": "dark",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142052339.jpg",
+      "variant": "combined",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142056336.jpg",
+      "variant": "original",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        7,
+        8
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142056336.jpg",
+      "variant": "blur",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        7,
+        8
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142056336.jpg",
+      "variant": "jpeg",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        7,
+        8
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142056336.jpg",
+      "variant": "lowres",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        7,
+        8
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142056336.jpg",
+      "variant": "noise",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        7,
+        8
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142056336.jpg",
+      "variant": "dark",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        7,
+        8
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142056336.jpg",
+      "variant": "combined",
+      "status": "no_dialog",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142059383.jpg",
+      "variant": "original",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        7,
+        8
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142059383.jpg",
+      "variant": "blur",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        7,
+        8
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142059383.jpg",
+      "variant": "jpeg",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        7,
+        8
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142059383.jpg",
+      "variant": "lowres",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        7,
+        8
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142059383.jpg",
+      "variant": "noise",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        7,
+        8
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142059383.jpg",
+      "variant": "dark",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        7,
+        8
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142059383.jpg",
+      "variant": "combined",
+      "status": "no_dialog",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142109412.jpg",
+      "variant": "original",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142109412.jpg",
+      "variant": "blur",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142109412.jpg",
+      "variant": "jpeg",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142109412.jpg",
+      "variant": "lowres",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142109412.jpg",
+      "variant": "noise",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142109412.jpg",
+      "variant": "dark",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142109412.jpg",
+      "variant": "combined",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142116069.jpg",
+      "variant": "original",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        3,
+        6
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        3,
+        6
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142116069.jpg",
+      "variant": "blur",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        3,
+        6
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        3,
+        6
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142116069.jpg",
+      "variant": "jpeg",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        3,
+        6
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        3,
+        6
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142116069.jpg",
+      "variant": "lowres",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        3,
+        6
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        3,
+        6
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142116069.jpg",
+      "variant": "noise",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        3,
+        6
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        3,
+        6
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142116069.jpg",
+      "variant": "dark",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        3,
+        6
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        3,
+        6
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142116069.jpg",
+      "variant": "combined",
+      "status": "geometry_error",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        3,
+        6
+      ],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142127172.jpg",
+      "variant": "original",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142127172.jpg",
+      "variant": "blur",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142127172.jpg",
+      "variant": "jpeg",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142127172.jpg",
+      "variant": "lowres",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142127172.jpg",
+      "variant": "noise",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142127172.jpg",
+      "variant": "dark",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142127172.jpg",
+      "variant": "combined",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142127317.jpg",
+      "variant": "original",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142127317.jpg",
+      "variant": "blur",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142127317.jpg",
+      "variant": "jpeg",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142127317.jpg",
+      "variant": "lowres",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142127317.jpg",
+      "variant": "noise",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142127317.jpg",
+      "variant": "dark",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142127317.jpg",
+      "variant": "combined",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142133269.jpg",
+      "variant": "original",
+      "status": "solved",
+      "expected_target": "bicycles",
+      "expected_tiles": [
+        1
+      ],
+      "target": "bicycles",
+      "tiles": [
+        1
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142133269.jpg",
+      "variant": "blur",
+      "status": "solved",
+      "expected_target": "bicycles",
+      "expected_tiles": [
+        1
+      ],
+      "target": "bicycles",
+      "tiles": [
+        1
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142133269.jpg",
+      "variant": "jpeg",
+      "status": "solved",
+      "expected_target": "bicycles",
+      "expected_tiles": [
+        1
+      ],
+      "target": "bicycles",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142133269.jpg",
+      "variant": "lowres",
+      "status": "solved",
+      "expected_target": "bicycles",
+      "expected_tiles": [
+        1
+      ],
+      "target": "bicycles",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142133269.jpg",
+      "variant": "noise",
+      "status": "solved",
+      "expected_target": "bicycles",
+      "expected_tiles": [
+        1
+      ],
+      "target": "bicycles",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142133269.jpg",
+      "variant": "dark",
+      "status": "solved",
+      "expected_target": "bicycles",
+      "expected_tiles": [
+        1
+      ],
+      "target": "bicycles",
+      "tiles": [
+        1
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142133269.jpg",
+      "variant": "combined",
+      "status": "solved",
+      "expected_target": "bicycles",
+      "expected_tiles": [
+        1
+      ],
+      "target": "i cannot answer this question because the image provided is too blurry to identify any objects",
+      "tiles": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "exact": false,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142148735.jpg",
+      "variant": "original",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142148735.jpg",
+      "variant": "blur",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142148735.jpg",
+      "variant": "jpeg",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142148735.jpg",
+      "variant": "lowres",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142148735.jpg",
+      "variant": "noise",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142148735.jpg",
+      "variant": "dark",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142148735.jpg",
+      "variant": "combined",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142153737.jpg",
+      "variant": "original",
+      "status": "solved",
+      "expected_target": "dogs",
+      "expected_tiles": [
+        0,
+        4,
+        7
+      ],
+      "target": "dogs",
+      "tiles": [
+        4,
+        7
+      ],
+      "exact": false,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142153737.jpg",
+      "variant": "blur",
+      "status": "solved",
+      "expected_target": "dogs",
+      "expected_tiles": [
+        0,
+        4,
+        7
+      ],
+      "target": "dogs",
+      "tiles": [
+        4,
+        7
+      ],
+      "exact": false,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142153737.jpg",
+      "variant": "jpeg",
+      "status": "solved",
+      "expected_target": "dogs",
+      "expected_tiles": [
+        0,
+        4,
+        7
+      ],
+      "target": "dogs",
+      "tiles": [
+        7
+      ],
+      "exact": false,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142153737.jpg",
+      "variant": "lowres",
+      "status": "solved",
+      "expected_target": "dogs",
+      "expected_tiles": [
+        0,
+        4,
+        7
+      ],
+      "target": "dogs",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142153737.jpg",
+      "variant": "noise",
+      "status": "solved",
+      "expected_target": "dogs",
+      "expected_tiles": [
+        0,
+        4,
+        7
+      ],
+      "target": "dogs",
+      "tiles": [
+        4,
+        7
+      ],
+      "exact": false,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142153737.jpg",
+      "variant": "dark",
+      "status": "solved",
+      "expected_target": "dogs",
+      "expected_tiles": [
+        0,
+        4,
+        7
+      ],
+      "target": "dogs",
+      "tiles": [
+        4,
+        7
+      ],
+      "exact": false,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-live",
+      "source": "PXL_20261014_142153737.jpg",
+      "variant": "combined",
+      "status": "solved",
+      "expected_target": "dogs",
+      "expected_tiles": [
+        0,
+        4,
+        7
+      ],
+      "target": "i cannot answer this question because the image provided is too blurry to identify any objects",
+      "tiles": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        7,
+        8
+      ],
+      "exact": false,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142052339.jpg",
+      "variant": "original",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142052339.jpg",
+      "variant": "combined",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142056336.jpg",
+      "variant": "original",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        7,
+        8
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142056336.jpg",
+      "variant": "combined",
+      "status": "no_dialog",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142059383.jpg",
+      "variant": "original",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        7,
+        8
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142059383.jpg",
+      "variant": "combined",
+      "status": "no_dialog",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        7,
+        8
+      ],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142109412.jpg",
+      "variant": "original",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142109412.jpg",
+      "variant": "combined",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142116069.jpg",
+      "variant": "original",
+      "status": "solved",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        3,
+        6
+      ],
+      "target": "cars",
+      "tiles": [
+        1,
+        3,
+        6
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142116069.jpg",
+      "variant": "combined",
+      "status": "geometry_error",
+      "expected_target": "cars",
+      "expected_tiles": [
+        1,
+        3,
+        6
+      ],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142127172.jpg",
+      "variant": "original",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142127172.jpg",
+      "variant": "combined",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142127317.jpg",
+      "variant": "original",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142127317.jpg",
+      "variant": "combined",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142133269.jpg",
+      "variant": "original",
+      "status": "solved",
+      "expected_target": "bicycles",
+      "expected_tiles": [
+        1
+      ],
+      "target": "bicycles",
+      "tiles": [
+        1
+      ],
+      "exact": true,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142133269.jpg",
+      "variant": "combined",
+      "status": "solved",
+      "expected_target": "bicycles",
+      "expected_tiles": [
+        1
+      ],
+      "target": "traffic lights",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142148735.jpg",
+      "variant": "original",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142148735.jpg",
+      "variant": "combined",
+      "status": "no_dialog",
+      "expected_target": "",
+      "expected_tiles": [],
+      "target": "",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": false
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142153737.jpg",
+      "variant": "original",
+      "status": "solved",
+      "expected_target": "dogs",
+      "expected_tiles": [
+        0,
+        4,
+        7
+      ],
+      "target": "dogs",
+      "tiles": [
+        4,
+        7
+      ],
+      "exact": false,
+      "coordinates_valid": true
+    },
+    {
+      "run": "results-mistral",
+      "source": "PXL_20261014_142153737.jpg",
+      "variant": "combined",
+      "status": "solved",
+      "expected_target": "dogs",
+      "expected_tiles": [
+        0,
+        4,
+        7
+      ],
+      "target": "traffic lights",
+      "tiles": [],
+      "exact": false,
+      "coordinates_valid": true
+    }
+  ]
+}
