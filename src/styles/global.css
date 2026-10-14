@@ -1,0 +1,42 @@
+@font-face {
+  font-family: 'DM Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/dm-sans.woff2') format('woff2');
+}
+
+:root {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 18px;
+  color-scheme: light;
+  color: #242027;
+  background: #fff;
+  --text: #242027;
+  --muted: #665d6b;
+  --line: #ded6dc;
+  --accent: #2563eb;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; }
+button, input { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+button { cursor: pointer; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+a { color: inherit; }
+h1, h2 { line-height: 1.15; letter-spacing: -.035em; font-weight: 550; }
+p { line-height: 1.5; }
+.button {
+  display: inline-block;
+  padding: 13px 20px;
+  min-height: 50px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--text);
+  text-decoration: none;
+}
+.button.primary { color: white; background: var(--accent); border-color: var(--accent); }
+.muted { color: var(--muted); }

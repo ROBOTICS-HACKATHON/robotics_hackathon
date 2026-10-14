@@ -3,3 +3,8 @@ outputs/
 .venv/
 lerobot/
 touch/screen_calib.json
+node_modules/
+.astro/
+dist/
+.env
+.env.*
