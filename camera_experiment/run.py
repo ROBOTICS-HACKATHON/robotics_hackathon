@@ -93,7 +93,8 @@ def photo_layout(frame: Frame) -> Result[Layout, Failure]:
 
 def _photo_layout(frame: Frame) -> list[Layout]:
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, (90, 120, 65), (135, 255, 255))
+    brightness = max(20, min(65, round(float(np.percentile(hsv[:, :, 2], 80)) * .3)))
+    mask = cv2.inRange(hsv, (90, 120, brightness), (135, 255, 255))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     boxes = [cv2.boundingRect(contour) for contour in contours
@@ -167,6 +168,12 @@ async def _solve(screen: Screen, layout: Layout, model: str) -> Record:
 
 
 async def process(path: Path, variant: str, args: Options) -> Result[Record, Failure]:
+    folder = args.out / path.stem / variant
+    cleared = attempt("invalidate previous plan", lambda: [
+        (folder / name).unlink(missing_ok=True)
+        for name in ("actions.json", "plan.png", "challenge.png", "geometry.json")])
+    if isinstance(cleared, Err):
+        return cleared
     loaded = attempt("read photo", lambda: cv2.imread(str(path)))
     if isinstance(loaded, Err):
         return loaded
@@ -183,7 +190,6 @@ async def process(path: Path, variant: str, args: Options) -> Result[Record, Fai
     if isinstance(normalized, Err):
         return normalized
     screen = normalized.value
-    folder = args.out / path.stem / variant
     created = attempt("create output directory", lambda: folder.mkdir(parents=True, exist_ok=True))
     if isinstance(created, Err):
         return created

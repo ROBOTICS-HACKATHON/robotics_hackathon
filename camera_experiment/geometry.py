@@ -48,16 +48,19 @@ def locate(frame: Frame) -> Result[Matrix, Failure]:
     )
 
 
-def _locate(frame: Frame) -> list[Matrix]:
+def _locate(frame: Frame, smooth: bool = False) -> list[Matrix]:
     scale = min(1.0, 1200 / frame.shape[1])
     small = cv2.resize(frame, (round(frame.shape[1] * scale), round(frame.shape[0] * scale)))
+    if smooth:
+        small = cv2.GaussianBlur(small, (5, 5), 0)
     hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, (0, 0, 100), (179, 150, 255))
+    brightness = max(30, min(100, round(float(np.percentile(hsv[:, :, 2], 80)) * .55)))
+    mask = cv2.inRange(hsv, (0, 0, brightness), (179, 150, 255))
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     candidates: list[Matrix] = []
     height, width = small.shape[:2]
     for contour in contours:
-        polygon = cv2.approxPolyDP(contour, .02 * cv2.arcLength(contour, True), True)
+        polygon = cv2.approxPolyDP(contour, (.03 if smooth else .02) * cv2.arcLength(contour, True), True)
         if len(polygon) != 4 or not cv2.isContourConvex(polygon):
             continue
         if cv2.contourArea(polygon) < width * height * .08:
@@ -76,6 +79,8 @@ def _locate(frame: Frame) -> list[Matrix]:
         vertical = np.linalg.norm(ordered[3] - ordered[0])
         if 1.2 < horizontal / vertical < 2.3:
             candidates.append(ordered / scale)
+    if not candidates and not smooth:
+        return _locate(frame, smooth=True)
     return sorted(candidates, key=lambda q: abs(float(cv2.contourArea(q.astype(np.float32)))),
                   reverse=True)
 
