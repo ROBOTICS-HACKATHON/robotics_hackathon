@@ -23,14 +23,17 @@ never moves the arm, so it can't make taps worse at the start.
 """
 
 import argparse
+import hashlib
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import cv2
 import numpy as np
 
 from see import ScreenCamera
+from vision_options import Error, VisionOptions, add_vision_arguments, attempt, load_parameters, vision_options
 
 HERE = Path(__file__).resolve().parent
 MODEL_FILE = HERE / "tip_model.json"
@@ -216,6 +219,13 @@ def camera_pose(quad, shape, f, aspect=SCREEN_ASPECT, width_mm=SCREEN_WIDTH_MM):
 
 
 def ray(pose, px):
+    if "distortion" in pose:
+        point = np.array(px, dtype=float)
+        if pose["rot180"]:
+            point = np.array(pose["image_size"]) - 1 - point
+        xy = cv2.undistortPoints(point.reshape(1, 1, 2), pose["K"], pose["distortion"])[0, 0]
+        d = pose["R"].T @ np.array([xy[0], xy[1], 1.0])
+        return pose["C"], d / np.linalg.norm(d)
     d = pose["R"].T @ np.linalg.inv(pose["K"]) @ np.array([px[0], px[1], 1.0])
     return pose["C"], d / np.linalg.norm(d)
 
@@ -314,7 +324,17 @@ def fit_geometry(samples, width_mm):
 
 class TipVision:
     def __init__(self, cameras, color="pink", cid=None, aspect=SCREEN_ASPECT, width_mm=SCREEN_WIDTH_MM,
-                 max_gap_mm=12.0):
+                 max_gap_mm=12.0, options=None):
+        self.options = options or VisionOptions()
+        self.parameters = {}
+        if self.options.calibration:
+            result = load_parameters(self.options.calibration)
+            if isinstance(result, Error):
+                raise SystemExit(result.message)
+            self.parameters = result.value
+        self.last_rejection = None
+        self.last_fresh = []
+        self.last_receive_times = []
         self.color = color
         picked = load_picked()
         if picked and picked.get("color"):  # taught by clicking in the live view: wins over TIP_COLOR
@@ -325,14 +345,25 @@ class TipVision:
         self.geom = load_geometry()  # taught in ./lr tip-live: screen shape + focal lengths
         if self.geom.get("aspect"):
             self.aspect = self.geom["aspect"]
+        if self.options.screen_height_mm:
+            self.aspect = self.width_mm / self.options.screen_height_mm
         self.focal = {}  # camera index -> recent focal estimates (median is used)
         self.specs = parse_cameras(cameras) if isinstance(cameras, str) else list(cameras or [])
+        if self.options.focal_px and len(self.options.focal_px) != len(self.specs):
+            raise SystemExit("--vision-focal-px needs one value per configured camera")
+        self.manual_focal = dict(zip(self.specs, self.options.focal_px))
+        if self.options.calibration:
+            missing = [spec for spec in self.specs if spec not in self.parameters]
+            if missing:
+                raise SystemExit("camera calibration missing: " + ", ".join(missing))
         self.cams = []
+        self.frame_shapes = {}
         ok_specs = []
         for s in self.specs:
             try:
                 cam = ScreenCamera(s)
-                cam.frame()  # make sure it really delivers pictures
+                initial = cam.frame()  # make sure it really delivers pictures
+                self.frame_shapes[s] = list(initial.shape[:2])
                 self.cams.append(cam)
                 ok_specs.append(s)
             except (SystemExit, Exception) as e:
@@ -341,10 +372,22 @@ class TipVision:
         self.cid = cid
         allm = json.loads(MODEL_FILE.read_text()) if MODEL_FILE.exists() else {}
         self.data = allm.get(self.key(), {"samples": []})
+        self._active_key = self.key()
+        self.valid_err = None
         self._fit()
 
     def key(self):
-        return f"{self.cid}|{'|'.join(self.specs)}"
+        base = f"{self.cid}|{'|'.join(self.specs)}"
+        if self.options.setup_id is None:
+            return base
+        setup = {"id": self.options.setup_id, "width_mm": self.width_mm, "aspect": self.aspect,
+                 "color": self.color, "focal_px": self.manual_focal, "geometry": self.geom,
+                 "frame_shapes": self.frame_shapes, "tip_offset_mm": self.options.tip_offset_mm,
+                 "rot180": [cam.src.rot180 for cam in self.cams],
+                 "parameters": {spec: {"image_size": p.image_size, "matrix": p.matrix.tolist(),
+                                       "distortion": p.distortion.tolist()} for spec, p in self.parameters.items()}}
+        digest = hashlib.sha256(json.dumps(setup, sort_keys=True).encode()).hexdigest()[:16]
+        return f"{base}|setup:{digest}"
 
     @property
     def n(self):
@@ -363,27 +406,80 @@ class TipVision:
     # ---- seeing ----
     def observe(self):
         """One look from every camera. List (per camera) of {'uv','px','area'} or None."""
-        out = []
-        frames = []  # filled first, then swapped in, so the live view never sees a half-empty list
-        for cam in self.cams:
-            try:
-                f = cam.frame()
-                quad, _ = cam.locate(f)
-                tip = find_tip(f, self.color, quad) if quad is not None else None
-                frames.append((f, quad, tip))
-                if tip is None:
-                    out.append(None)
-                    continue
+        if self.options.setup_id is not None and self.key() != self._active_key:
+            self.data = {"samples": []}
+            self._active_key = self.key()
+            self._fit()
+        count = max(1, self.options.stable_frames)
+        observations = []
+        for sample in range(count):
+            if sample:
+                time.sleep(0.05)
+            observations.append(self._observe_once())
+        out = observations[-1]
+        if self.options.setup_id is not None and self.key() != self._active_key:
+            self.data = {"samples": []}
+            self._active_key = self.key()
+            self._fit()
+        if self.options.stable_frames:
+            for i, observation in enumerate(out):
+                points = [batch[i]["px"] for batch in observations if batch[i]]
+                if observation:
+                    observation["stable"] = (len(points) == count
+                                             and float(np.ptp(np.array(points), axis=0).max()) <= self.options.stable_px)
+        return out
+
+    def _capture(self, cam):
+        """Contain camera and detection failures before joining concurrent reads."""
+        def capture():
+            f = cam.frame()
+            received = time.monotonic()
+            quad, fresh = cam.locate(f)
+            tip = find_tip(f, self.color, quad) if quad is not None else None
+            observation = None
+            if tip is not None:
                 (x, y), area = tip
                 H = cv2.getPerspectiveTransform(quad, UNIT)
                 uv = cv2.perspectiveTransform(np.array([[[x, y]]], np.float32), H)[0, 0]
-                out.append({"uv": [float(uv[0]), float(uv[1])], "px": [float(x), float(y)], "area": area,
-                            "quad": quad.tolist(), "shape": list(f.shape[:2])})
-            except Exception as e:
-                print(f"(camera read failed: {e})")
+                observation = {"uv": [float(uv[0]), float(uv[1])], "px": [float(x), float(y)], "area": area,
+                               "quad": quad.tolist(), "shape": list(f.shape[:2])}
+                if self.options.paired_capture:
+                    observation["received_at"] = received
+                if self.options.diagnostics:
+                    observation["markers_fresh"] = fresh
+            return (f, quad, tip), observation, fresh, received
+
+        return attempt(capture)
+
+    def _observe_once(self):
+        out = []
+        frames, freshness, received = [], [], []
+        if self.options.paired_capture and self.n > 1:
+            def capture_pair():
+                with ThreadPoolExecutor(max_workers=self.n) as pool:
+                    return list(pool.map(self._capture, self.cams))
+            pair = attempt(capture_pair)
+            results = [pair] * self.n if isinstance(pair, Error) else pair.value
+        else:
+            results = [self._capture(cam) for cam in self.cams]
+        for result in results:
+            if isinstance(result, Error):
+                print(f"(camera read failed: {result.message})")
                 frames.append((None, None, None))
                 out.append(None)
+                freshness.append(False)
+                received.append(None)
+            else:
+                frame, observation, fresh, timestamp = result.value
+                frames.append(frame)
+                out.append(observation)
+                freshness.append(fresh)
+                received.append(timestamp)
         self.last_frames = frames
+        for spec, (frame, _, _) in zip(self.specs, frames):
+            if frame is not None:
+                self.frame_shapes[spec] = list(frame.shape[:2])
+        self.last_fresh, self.last_receive_times = freshness, received
         return out
 
     # ---- estimating ----
@@ -397,6 +493,34 @@ class TipVision:
 
     def _pose(self, i, o):
         quad = np.array(o["quad"], np.float32)
+        if self.options.calibration:
+            parameters = self.parameters[self.specs[i]]
+            if tuple(reversed(o["shape"])) != parameters.image_size:
+                self.last_rejection = f"camera {i + 1}: resolution differs from calibration"
+                return None
+            def solve():
+                points = quad.astype(float)
+                if self.cams[i].src.rot180:
+                    points = np.array(parameters.image_size) - 1 - points
+                W, H = self.width_mm, self.width_mm / self.aspect
+                obj = np.array([[0, 0, 0], [W, 0, 0], [W, H, 0], [0, H, 0]], float)
+                ok, rvec, tvec = cv2.solvePnP(obj, points, parameters.matrix, parameters.distortion,
+                                            flags=cv2.SOLVEPNP_IPPE)
+                if not ok:
+                    return None
+                R, _ = cv2.Rodrigues(rvec)
+                return {"K": parameters.matrix, "R": R, "C": (-R.T @ tvec).ravel(),
+                        "distortion": parameters.distortion, "image_size": parameters.image_size,
+                        "rot180": self.cams[i].src.rot180}
+            result = attempt(solve)
+            if isinstance(result, Error):
+                self.last_rejection = f"camera {i + 1}: {result.message}"
+                return None
+            if result.value is None:
+                self.last_rejection = f"camera {i + 1}: calibrated pose unavailable"
+            return result.value
+        if self.specs[i] in self.manual_focal:
+            return camera_pose(quad, o["shape"], self.manual_focal[self.specs[i]], self.aspect, self.width_mm)
         frel = self.geom.get("focal_rel", {}).get(self.specs[i]) if i < len(self.specs) else None
         if frel:  # taught: much more reliable than guessing it from the screen outline
             return camera_pose(quad, o["shape"], frel * o["shape"][1], self.aspect, self.width_mm)
@@ -410,6 +534,9 @@ class TipVision:
 
     def teach_distance(self, obs, true_mm):
         """Record 'the tip is true_mm above the glass now' and refit shape + focal lengths."""
+        if (self.options.calibration or self.options.focal_px or self.options.screen_height_mm
+                or self.options.tip_offset_mm is not None):
+            return None, "distance teaching is disabled while explicit camera or screen parameters are active"
         seen = [o for o in obs if o and o.get("quad")]
         if len(seen) < 2:
             return None, "both cameras must see the screen and the tip"
@@ -434,6 +561,8 @@ class TipVision:
     def forget_distance(self):
         GEOM_FILE.unlink(missing_ok=True)
         self.geom, self.aspect, self.focal = {}, SCREEN_ASPECT, {}
+        if self.options.screen_height_mm:
+            self.aspect = self.width_mm / self.options.screen_height_mm
 
     def tip3d(self, obs):
         """3D tip from two cameras: (u, v) under the tip, height above the glass (mm), line gap (mm)."""
@@ -444,23 +573,67 @@ class TipVision:
         pa, pb = self._pose(a, oa), self._pose(b, ob)
         if pa is None or pb is None:
             return None
-        P, gap = triangulate(ray(pa, oa["px"]), ray(pb, ob["px"]))
+        result = attempt(lambda: (ray(pa, oa["px"]), ray(pb, ob["px"])))
+        if isinstance(result, Error):
+            self.last_rejection = result.message
+            return None
+        r1, r2 = result.value
+        angle = float(np.degrees(np.arccos(np.clip(abs(r1[1] @ r2[1]), 0, 1))))
+        if self.options.check_geometry and angle < self.options.min_ray_angle_deg:
+            self.last_rejection = f"ray angle {angle:.1f} deg is too small"
+            return None
+        P, gap = triangulate(r1, r2)
         if P is None:
+            if self.options.check_geometry:
+                self.last_rejection = "parallel viewing rays"
             return None
         side = -1.0 if (pa["C"][2] + pb["C"][2]) < 0 else 1.0  # cameras are on the viewer side
         W, H = self.width_mm, self.width_mm / self.aspect
-        h = float(side * P[2]) - float(self.geom.get("offset_mm", 0.0))  # taught: marker height at contact
+        offset = self.options.tip_offset_mm
+        if offset is None:
+            offset = float(self.geom.get("offset_mm", 0.0))
+        h = float(side * P[2]) - offset
+        if self.options.check_geometry:
+            if not np.isfinite(P).all() or not np.isfinite(gap):
+                self.last_rejection = "non-finite 3D point"
+                return None
+            if any(float((P - centre) @ direction) <= 0 for centre, direction in (r1, r2)):
+                self.last_rejection = "3D point is behind a camera"
+                return None
+            if not -2 <= h <= self.options.max_height_mm or not (-0.2 <= P[0] / W <= 1.2 and -0.2 <= P[1] / H <= 1.2):
+                self.last_rejection = "3D point is outside the hover workspace"
+                return None
         return {"uv": (float(P[0] / W), float(P[1] / H)), "height_mm": h, "gap_mm": gap,
+                "ray_angle_deg": angle,
                 "cam_dist_mm": [float(np.linalg.norm(pa["C"])), float(np.linalg.norm(pb["C"]))]}
 
     def estimate(self, obs):
+        estimate = self._estimate(obs)
+        if self.options.diagnostics:
+            estimate["diagnostics"] = self.diagnostics(estimate)
+        return estimate
+
+    def _estimate(self, obs):
         """{'landing': (u,v) or None, 'height': relative or None, 'cams': n seen}.
         Two cameras: real 3D (height in mm). One camera: learned parallax."""
         seen = [(i, np.array(o["uv"])) for i, o in enumerate(obs) if o]
         res = {"landing": None, "height": None, "cams": len(seen)}
+        self.last_rejection = None
         if not seen:
             return res
+        if self.options.stable_frames and any(o and not o.get("stable", False) for o in obs):
+            res["rejection"] = "tip is moving or missing during stability check"
+            return res
+        times = [o["received_at"] for o in obs if o and "received_at" in o]
+        if self.options.paired_capture and len(times) == 2:
+            res["pair_delay_ms"] = 1000 * abs(times[0] - times[1])
+            if res["pair_delay_ms"] > self.options.max_pair_delay_ms:
+                res["rejection"] = "phone receive times are too far apart"
+                return res
         t3 = self.tip3d(obs) if len(seen) >= 2 else None
+        if self.last_rejection:
+            res["rejection"] = self.last_rejection
+            return res
         if t3 is not None:
             res.update(height_mm=t3["height_mm"], gap_mm=t3["gap_mm"], tip_uv=t3["uv"], mode="3d")
             if t3["gap_mm"] > self.max_gap:  # the two sight lines don't meet: one camera saw something else
@@ -494,6 +667,11 @@ class TipVision:
         """A hover observation and where that tap really landed (from the page)."""
         if not obs or not any(obs):
             return
+        if self.options.check_geometry or self.options.paired_capture or self.options.stable_frames:
+            estimate = self.estimate(obs)
+            if estimate.get("rejection") or estimate.get("inconsistent"):
+                self.rejected = getattr(self, "rejected", 0) + 1
+                return
         t3 = self.tip3d(obs)
         if t3 is not None and t3["gap_mm"] <= self.max_gap and -0.2 <= t3["uv"][0] <= 1.2 and -0.2 <= t3["uv"][1] <= 1.2:
             pass  # a consistent 3D reading: keep it
@@ -523,6 +701,9 @@ class TipVision:
             self.data["samples"] = keep
             if est["landing"] is not None:
                 errs.append(float(np.hypot(*(np.array(est["landing"]) - S[i]["landed"]))))
+            elif (self.options.calibration or self.options.check_geometry
+                  or self.options.paired_capture or self.options.stable_frames):
+                errs.append(float("inf"))
         self._fit_offsets()
         return float(np.mean(errs)) if errs else None
 
@@ -580,6 +761,15 @@ class TipVision:
                 + (f", accuracy ~{100 * ve:.1f}% of screen" if ve is not None else "") + f", {state}"
                 + (f", {rj} impossible readings ignored" if rj else ""))
 
+    def diagnostics(self, estimate):
+        """Describe measurement provenance without claiming physical accuracy."""
+        sources = [("calibrated" if spec in self.parameters else "manual focal" if spec in self.manual_focal
+                    else "distance taught" if spec in self.geom.get("focal_rel", {}) else "approximate")
+                   for spec in self.specs]
+        return {"camera_parameters": sources, "markers_fresh": self.last_fresh,
+                "landing_validated": self.ready, "rejection": estimate.get("rejection"),
+                "pair_delay_ms": estimate.get("pair_delay_ms"), "setup_id": self.options.setup_id}
+
 
 def check_setup(vision, out=Path("outputs")):
     """Camera check: markers, tip, viewing angles, and whether a pair can measure height."""
@@ -629,6 +819,8 @@ def check_setup(vision, out=Path("outputs")):
     elif est["landing"]:
         print(f"  landing estimate u={est['landing'][0]:.3f} v={est['landing'][1]:.3f} (1 camera: no height)")
     print(vision.describe())
+    if vision.options.diagnostics:
+        print("vision diagnostics: " + json.dumps(vision.diagnostics(est)))
 
 
 LIVE_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Tip live view</title>
@@ -710,7 +902,7 @@ async function tick(){
   try{
     const s = await (await fetch('/state',{cache:'no-store'})).json();
     const H=document.getElementById('h'), U=document.getElementById('uv'), G=document.getElementById('gap'), S=document.getElementById('st');
-    if(s.height_mm!=null){ H.textContent = s.height_mm<2 ? 'touching' : s.height_mm.toFixed(1)+' mm';
+    if(s.height_mm!=null){ H.textContent = s.diagnostics ? s.height_mm.toFixed(1)+' mm (estimated)' : s.height_mm<2 ? 'touching' : s.height_mm.toFixed(1)+' mm';
       H.className='big '+(s.height_mm<2?'ok':''); } else H.textContent='-';
     if(s.uv){ U.textContent=s.uv[0].toFixed(3)+', '+s.uv[1].toFixed(3);
       const d=document.getElementById('dot'); d.style.display='block'; d.style.left=(s.uv[0]*100)+'%'; d.style.top=(s.uv[1]*100)+'%'; }
@@ -718,6 +910,10 @@ async function tick(){
     G.textContent = s.gap_mm!=null ? s.gap_mm.toFixed(1)+' mm' : '-';
     G.className='big '+(s.gap_mm==null?'':(s.gap_mm<=12?'ok':'bad'));
     S.textContent=s.status; S.className='big '+(s.status==='3D OK'?'ok':'warn');
+    if(s.diagnostics){ const d=s.diagnostics;
+      S.textContent += ' | '+d.camera_parameters.join(' / ')
+        +' | markers: '+d.markers_fresh.map(f=>f?'fresh':'remembered / missing').join(' / ')
+        +' | landing: '+(d.landing_validated?'validated':'learning only'); }
     const P=document.getElementById('pl');
     if(s.pair_deg!=null){ P.textContent=s.pair_deg+'° '+s.placement; P.className='big '+(s.placement==='good'?'ok':'warn'); }
     else P.textContent='-';
@@ -939,6 +1135,10 @@ def live(vision, port=8766, out_dir="outputs"):
             else:
                 st["status"] = ("no camera sees the tip" if all(fr[1] is not None for fr in vision.last_frames)
                                 else "screen markers not visible")
+            if est.get("rejection"):
+                st["status"] = est["rejection"]
+            if vision.options.diagnostics:
+                st["diagnostics"] = vision.diagnostics(est)
             # camera placement: each camera's angle to the screen + the angle between the two
             geo = [view_geometry(q, f.shape, vision.aspect) if (f is not None and q is not None) else None
                    for f, q, _ in vision.last_frames]
@@ -972,10 +1172,14 @@ if __name__ == "__main__":
     p.add_argument("--screen-mm", type=float, default=SCREEN_WIDTH_MM, help="marker-to-marker width of the screen")
     p.add_argument("--live", action="store_true", help="live view in the browser (no arm needed)")
     p.add_argument("--port", type=int, default=8766)
+    add_vision_arguments(p)
     a = p.parse_args()
+    options = vision_options(a)
+    if isinstance(options, Error):
+        p.error(options.message)
     from common import countdown
     countdown(a.delay, "switch to the page with the corner markers (full-screen, F11)")
-    v = TipVision(a.cameras, a.color, width_mm=a.screen_mm)
+    v = TipVision(a.cameras, a.color, width_mm=a.screen_mm, options=options.value)
     if not v.enabled:
         raise SystemExit("No camera configured (CAMERA / CAMERA2 in lr.conf).")
     if a.live:

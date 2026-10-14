@@ -247,7 +247,12 @@ if __name__ == "__main__":
     p.add_argument("--no-learned", action="store_true", help="ignore the learned model (use calibration only)")
     p.add_argument("--no-correct", action="store_true", help="don't apply the learned aim correction")
     p.add_argument("--no-learn", action="store_true", help="don't update the correction after a test")
+    from vision_options import Error, add_vision_arguments, vision_options
+    add_vision_arguments(p)
     a = p.parse_args()
+    options = vision_options(a)
+    if isinstance(options, Error):
+        p.error(options.message)
 
     if a.home:
         pts = []
@@ -278,7 +283,7 @@ if __name__ == "__main__":
     if a.cameras and not a.no_vision:
         from correction import calib_id as _cid
         from tipvision import TipVision
-        vision = TipVision(a.cameras, a.tip_color, width_mm=a.screen_mm, cid=_cid(load_calib()))
+        vision = TipVision(a.cameras, a.tip_color, width_mm=a.screen_mm, cid=_cid(load_calib()), options=options.value)
     with Tapper(a.port, a.id, a.robot, a.lift, a.press, a.speed, via_home=not a.no_home,
                 smooth=a.smooth, own_path=not a.simple_path, correct=not a.no_correct,
                 dwell=a.dwell, max_load=a.max_load, torque=a.torque, learned=not a.no_learned,
@@ -352,6 +357,8 @@ if __name__ == "__main__":
                 line += (f"  [cams: predicted ({lv['landing'][0]:.3f},{lv['landing'][1]:.3f})"
                          + (f", height {lv['height']:.2f}" if lv.get("height") is not None else "") + "]")
             print(line, flush=True)
+            if a.vision_diagnostics and t.last_vision:
+                print("vision diagnostics: " + json.dumps(t.last_vision.get("diagnostics", {})))
 
     if srv:
         summ = measure_summary(results)

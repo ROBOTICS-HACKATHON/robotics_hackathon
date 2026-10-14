@@ -266,10 +266,11 @@ cmd_see() {
 }
 
 cmd_tip-test() {
-  local cams="${1:-}"
+  local cams=""
+  if [ $# -gt 0 ] && [[ "$1" != --* ]]; then cams="$1"; shift; fi
   [ -z "$cams" ] && { cams="${CAMERA:-}"; [ -n "${CAMERA2:-}" ] && cams="${cams:+$cams,}$CAMERA2"; }
   run_hw python /repo/touch/tipvision.py --cameras "$cams" --color "${TIP_COLOR:-pink}" --out /work/outputs \
-    --delay "${DELAY:-5}" --screen-mm "${SCREEN_WIDTH_MM:-300}"
+    --delay "${DELAY:-5}" --screen-mm "${SCREEN_WIDTH_MM:-300}" "$@"
 }
 
 cmd_tip-live() {
@@ -277,7 +278,7 @@ cmd_tip-live() {
   [ -n "${CAMERA2:-}" ] && cams="${cams:+$cams,}$CAMERA2"
   say "Open http://localhost:8766/ in your browser (Ctrl+C here to stop)"
   RUN_EXTRA="-p 8766:8766" run_hw python /repo/touch/tipvision.py --cameras "$cams" --color "${TIP_COLOR:-pink}" \
-    --screen-mm "${SCREEN_WIDTH_MM:-300}" --live --out /work/outputs
+    --screen-mm "${SCREEN_WIDTH_MM:-300}" --live --out /work/outputs "$@"
 }
 
 cmd_share() {

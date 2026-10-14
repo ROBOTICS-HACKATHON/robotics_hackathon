@@ -19,6 +19,7 @@ from correction import calib_id
 from learner import LearnedModel, ZoneBandit, draw_heatmap, refine, zone_centers, zone_of, zone_report, zone_weights
 from tap import Tapper
 from touchserver import TouchServer, save_log
+from vision_options import Error, add_vision_arguments, vision_options
 
 p = argparse.ArgumentParser()
 p.add_argument("--port", required=True)
@@ -34,7 +35,11 @@ p.add_argument("--cameras", default="", help="tip vision cameras: 'none', one, o
 p.add_argument("--tip-color", default="pink")
 p.add_argument("--screen-mm", type=float, default=300.0, help="marker-to-marker screen width (for mm heights)")
 p.add_argument("--delay", type=float, default=5, help="seconds to switch to the page before starting")
+add_vision_arguments(p)
 a = p.parse_args()
+options = vision_options(a)
+if isinstance(options, Error):
+    p.error(options.message)
 
 calib = load_calib()
 cal = calib["points"]
@@ -50,7 +55,7 @@ results = []
 vision = None
 if a.cameras:
     from tipvision import TipVision
-    vision = TipVision(a.cameras, a.tip_color, width_mm=a.screen_mm, cid=calib_id(calib))
+    vision = TipVision(a.cameras, a.tip_color, width_mm=a.screen_mm, cid=calib_id(calib), options=options.value)
 with Tapper(a.port, a.id, a.robot, speed=a.speed, max_load=a.max_load, correct=False, learned=False,
             vision=vision) as t:
     if vision is not None:
