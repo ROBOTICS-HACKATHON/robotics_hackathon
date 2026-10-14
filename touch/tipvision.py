@@ -41,7 +41,8 @@ COLORS = {
     "pink": [((140, 70, 90), (179, 255, 255)), ((0, 120, 120), (4, 255, 255))],
     "green": [((40, 80, 70), (85, 255, 255))],
     "orange": [((5, 130, 120), (21, 255, 255))],
-    "yellow": [((22, 110, 120), (36, 255, 255))],
+    # yellow as cheap webcams really see it: often shifted to orange-yellow and not very saturated
+    "yellow": [((10, 80, 70), (36, 255, 255))],
     "blue": [((95, 120, 70), (128, 255, 255))],
 }
 UNIT = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], np.float32)
@@ -54,25 +55,57 @@ def parse_cameras(spec):
     return [c.strip() for c in str(spec).split(",") if c.strip() and c.strip().lower() != "none"][:2]
 
 
+def color_ranges(color):
+    """A preset name, or a custom HSV range 'h1,s1,v1,h2,s2,v2' (OpenCV: H 0-179)."""
+    if color in COLORS:
+        return COLORS[color]
+    n = [int(x) for x in str(color).split(",")]
+    if len(n) != 6:
+        raise SystemExit(f"Unknown tip colour '{color}': use {', '.join(COLORS)} or 'h1,s1,v1,h2,s2,v2'")
+    return [(tuple(n[:3]), tuple(n[3:]))]
+
+
 def find_tip(frame, color, quad=None, min_area=12):
-    """Pixel centre of the biggest blob of `color` (near the screen). Returns ((x, y), area) or None."""
+    """Where the stylus tip is, in camera pixels. Returns ((x, y), area) or None.
+
+    Finds the biggest blob of `color` near the screen. If the coloured part is long (e.g. the
+    whole stylus body is coloured), the tip is the END of that blob that points into the screen,
+    not its middle."""
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     mask = np.zeros(hsv.shape[:2], np.uint8)
-    for lo, hi in COLORS[color]:
+    for lo, hi in color_ranges(color):
         mask |= cv2.inRange(hsv, np.array(lo, np.uint8), np.array(hi, np.uint8))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-    if quad is not None:  # only look on/near the screen (the tip can stick out a bit above it)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    if quad is not None:  # only look on/near the screen (the stylus can stick out over the edge)
         c = quad.mean(0)
-        grown = (c + (quad - c) * 1.25).astype(np.int32)
+        grown = (c + (quad - c) * 1.35).astype(np.int32)
         roi = np.zeros_like(mask)
         cv2.fillPoly(roi, [grown], 255)
         mask &= roi
-    n, _, stats, cents = cv2.connectedComponentsWithStats(mask)
+    n, labels, stats, cents = cv2.connectedComponentsWithStats(mask)
     if n <= 1:
         return None
     i = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
     area = int(stats[i, cv2.CC_STAT_AREA])
-    return (tuple(cents[i]), area) if area >= min_area else None
+    if area < min_area:
+        return None
+    ys, xs = np.nonzero(labels == i)
+    pts = np.c_[xs, ys].astype(float)
+    centre = pts.mean(0)
+    # elongated blob? -> take its end along the main axis
+    w, vecs = np.linalg.eigh(np.cov((pts - centre).T))
+    axis = vecs[:, 1]
+    if w[1] > 6 * max(w[0], 1e-6):
+        proj = (pts - centre) @ axis
+        ends = [centre + axis * np.percentile(proj, 2), centre + axis * np.percentile(proj, 98)]
+        if quad is not None:  # the tip is the end deeper inside the screen; the other end goes to the gripper
+            depth = [cv2.pointPolygonTest(quad.reshape(-1, 1, 2), (float(e[0]), float(e[1])), True) for e in ends]
+            tip = ends[int(np.argmax(depth))]
+        else:
+            tip = ends[1]
+        return (float(tip[0]), float(tip[1])), area
+    return (float(centre[0]), float(centre[1])), area
 
 
 def view_geometry(quad, shape, aspect=1.5):
@@ -263,7 +296,7 @@ def check_setup(vision, out=Path("outputs")):
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--cameras", default="", help="'none', one camera, or two separated by a comma")
-    p.add_argument("--color", default="pink", choices=sorted(COLORS))
+    p.add_argument("--color", default="pink", help="pink, green, orange, yellow, blue, or 'h1,s1,v1,h2,s2,v2'")
     p.add_argument("--out", default="outputs")
     p.add_argument("--delay", type=float, default=0, help="seconds to switch to the page before the check")
     a = p.parse_args()
