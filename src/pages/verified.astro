@@ -1,0 +1,35 @@
+---
+import Page from '../layouts/Page.astro';
+---
+<Page title="Access granted · CAPTCHA demo">
+  <main hidden>
+    <span class="check" aria-hidden="true">✓</span>
+    <p class="muted">Verification complete</p>
+    <h1>Access granted.</h1>
+    <p>You solved the <span id="solved-kind">image</span> challenge. Welcome to the website.</p>
+    <button class="button" disabled>Verified</button>
+    <button id="restart" class="button primary">Start again</button>
+  </main>
+  <script>
+    const kind = sessionStorage.getItem('captcha-solved');
+    if (kind !== 'image' && kind !== 'slider') {
+      window.location.replace('/');
+    } else {
+      const label = document.querySelector('#solved-kind');
+      const main = document.querySelector('main');
+      if (label) label.textContent = kind;
+      if (main) main.hidden = false;
+    }
+    document.querySelector('#restart')?.addEventListener('click', () => {
+      sessionStorage.removeItem('captcha-solved');
+      window.location.replace('/');
+    });
+  </script>
+  <style>
+    main { max-width: 640px; margin: 18vh auto; padding: 24px; }
+    h1 { font-size: 2.5rem; margin: 12px 0; }
+    .check { display: inline-grid; place-items: center; width: 60px; height: 60px; border: 1px solid #17683c; border-radius: 50%; font-size: 2rem; color: #17683c; }
+    .button { margin: 24px 8px 0 0; }
+    .button:disabled { color: #17683c; cursor: default; }
+  </style>
+</Page>
