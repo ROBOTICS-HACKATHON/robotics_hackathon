@@ -3,9 +3,11 @@ import Page from '../layouts/Page.astro';
 import ImageChallenge from '../components/ImageChallenge.astro';
 import SliderChallenge from '../components/SliderChallenge.astro';
 import TrainingOverlay from '../components/TrainingOverlay.astro';
+import { trainingCatalog } from '../data/training-catalog';
 ---
 <Page title="Human verification">
   <main class="selection">
+    <section class="single-challenge">
     <h1>Access website</h1>
     <p class="muted">Local robot demo. Choose a verification challenge.</p>
     <div class="choices">
@@ -13,7 +15,7 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
       <button class="choice" data-challenge="slider"><strong>GeeTest slider</strong><span>Slide the piece into the gap.</span><span aria-hidden="true">→</span></button>
       <button class="choice" data-challenge="turnstile"><strong>Cloudflare Turnstile</strong><span>Checkbox verification</span><span aria-hidden="true">→</span></button>
     </div>
-    <label class="challenge-option" for="challenge-number">Challenge<select id="challenge-number"><option value="random">Random</option>{Array.from({ length: 10 }, (_, index) => <option value={index}>{index + 1}</option>)}</select></label>
+    <label class="challenge-option" for="challenge-number">Challenge<select id="challenge-number"><option value="random">Random</option>{(['image', 'slider'] as const).map((kind) => <optgroup label={kind === 'image' ? 'Image grid' : 'Slider'}>{trainingCatalog.filter((entry) => entry.kind === kind).map((entry) => <option value={`${entry.kind}:${entry.index}`}>{entry.id}</option>)}</optgroup>)}</select></label>
     <label class="fullscreen-option"><input type="checkbox" id="fullscreen" checked /> Open fullscreen</label>
     <label class="fullscreen-option"><input type="checkbox" id="high-contrast" /> High contrast</label>
     <label class="fullscreen-option"><input type="checkbox" id="training-overlay-toggle" /> Training overlay</label>
@@ -26,6 +28,18 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
       <label for="training-overlay-focus">Target<select id="training-overlay-focus"><option value="all">All targets</option><option value="checkbox">Checkbox</option>{Array.from({ length: 9 }, (_, index) => <option value={`tile-${index + 1}`}>Tile {index + 1}</option>)}<option value="verify">Verify</option><option value="slider">Slider</option></select></label>
     </details>
     <p id="fullscreen-status" class="muted" role="status"></p>
+    </section>
+    <aside class="session-panel" aria-labelledby="session-title">
+      <h2 id="session-title">Training session</h2>
+      <p class="muted">A shuffled sequence without repeats.</p>
+      <label for="training-ratio">Training %<input id="training-ratio" type="number" min="10" max="90" step="1" value="80" /></label>
+      <p class="muted">Custom ratios split tasks; photos may overlap.</p>
+      <label for="session-split">Split<select id="session-split"><option value="train">Train · {trainingCatalog.filter((entry) => entry.split === 'train').length}</option><option value="test">Test · {trainingCatalog.filter((entry) => entry.split === 'test').length}</option></select></label>
+      <label for="session-kind">Tasks<select id="session-kind"><option value="mixed">Mixed</option><option value="image">Image</option><option value="slider">Slider</option></select></label>
+      <label for="session-count">Count<input id="session-count" type="number" min="1" value="100" /></label>
+      <p id="session-availability" class="muted" role="status"></p>
+      <button id="start-session" class="button primary" type="button">Start session</button>
+    </aside>
   </main>
   <dialog id="challenge-dialog" data-phase="checkbox" aria-label="Human verification">
     <button id="close-challenge" type="button" aria-label="Close challenge"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.5" /></svg></button>
@@ -33,15 +47,19 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
       <button id="human-checkbox" type="button">
         <span class="checkbox-box" aria-hidden="true"><svg class="checkbox-check" viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="12" fill="#038127" /><path d="m6 12 4 4 8-8" fill="none" stroke="white" stroke-width="2" /></svg></span>
         <span id="checkbox-label">I'm not a robot</span>
-        <span class="widget-brand recaptcha-brand"><img src="/brands/recaptcha.png" width="32" height="32" alt="" /><span>reCAPTCHA</span><small>Privacy - Terms</small></span>
+        <span class="widget-brand recaptcha-brand"><img src="/brands/recaptcha.avif" width="32" height="32" alt="" /><span>reCAPTCHA</span><small>Privacy - Terms</small></span>
         <span class="widget-brand turnstile-brand"><img src="/brands/cloudflare.svg" width="76" height="29" alt="Cloudflare" /><small>Privacy · Terms</small></span>
       </button>
     </div>
     <ImageChallenge />
     <SliderChallenge />
     <TrainingOverlay />
+    <div id="session-progress" hidden><span id="session-progress-label" role="status"></span><button id="stop-session" type="button">Stop session</button></div>
   </dialog>
   <script>
+    import { trainingCatalog, partitionTrainingCatalog } from '../data/training-catalog';
+    type CatalogEntry = (typeof trainingCatalog)[number];
+    type ChallengeKind = CatalogEntry['kind'] | 'turnstile';
     const dialog = document.querySelector<HTMLDialogElement>('#challenge-dialog');
     const checkbox = document.querySelector<HTMLButtonElement>('#human-checkbox');
     const checkboxStep = document.querySelector<HTMLElement>('#checkbox-step');
@@ -54,6 +72,61 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
     const practiceMode = document.querySelector<HTMLSelectElement>('#practice-mode');
     const practiceTile = document.querySelector<HTMLSelectElement>('#practice-tile');
     const practiceTileOption = document.querySelector<HTMLElement>('#practice-tile-option');
+    const sessionSplit = document.querySelector<HTMLSelectElement>('#session-split');
+    const sessionKind = document.querySelector<HTMLSelectElement>('#session-kind');
+    const sessionCount = document.querySelector<HTMLInputElement>('#session-count');
+    const trainingRatio = document.querySelector<HTMLInputElement>('#training-ratio');
+    const sessionAvailability = document.querySelector<HTMLElement>('#session-availability');
+    const startSession = document.querySelector<HTMLButtonElement>('#start-session');
+    const sessionProgress = document.querySelector<HTMLElement>('#session-progress');
+    const sessionProgressLabel = document.querySelector<HTMLElement>('#session-progress-label');
+    let kind: ChallengeKind = 'image';
+    let challengeIndex = 0;
+    let complete = false;
+    let pending = false;
+    let queue: CatalogEntry[] = [];
+    let queuePosition = 0;
+    let generation = 0;
+    let advanceTimer: number | undefined;
+    let sessionCatalog: readonly CatalogEntry[] = trainingCatalog;
+    if (trainingRatio) trainingRatio.value = sessionStorage.getItem('captcha-training-ratio') ?? '80';
+
+    function availableEntries(): CatalogEntry[] {
+      const mode = practiceMode?.value ?? 'full';
+      if (mode === 'checkbox') return [];
+      const filter = mode === 'tile' ? 'image' : mode === 'slider' ? 'slider' : sessionKind?.value ?? 'mixed';
+      return sessionCatalog.filter((entry) => entry.split === (sessionSplit?.value ?? 'train') && (filter === 'mixed' || entry.kind === filter));
+    }
+
+    function updateSessionSettings() {
+      const enteredRatio = Number(trainingRatio?.value ?? '80');
+      const ratio = Math.min(90, Math.max(10, Number.isFinite(enteredRatio) ? Math.round(enteredRatio) : 80));
+      if (trainingRatio) trainingRatio.value = String(ratio);
+      sessionStorage.setItem('captcha-training-ratio', String(ratio));
+      sessionCatalog = partitionTrainingCatalog(ratio);
+      if (sessionSplit) {
+        for (const option of sessionSplit.options) {
+          const split = option.value;
+          option.textContent = `${split === 'train' ? 'Train' : 'Test'} · ${sessionCatalog.filter((entry) => entry.split === split).length}`;
+        }
+      }
+      const entries = availableEntries();
+      if (sessionKind) {
+        const mode = practiceMode?.value ?? 'full';
+        sessionKind.disabled = mode !== 'full';
+        if (mode === 'tile') sessionKind.value = 'image';
+        if (mode === 'slider') sessionKind.value = 'slider';
+      }
+      if (sessionCount) {
+        sessionCount.max = String(entries.length);
+        sessionCount.disabled = entries.length === 0;
+        const count = Number(sessionCount.value);
+        sessionCount.value = String(Math.min(Math.max(Number.isFinite(count) ? Math.floor(count) : 100, 1), Math.max(entries.length, 1)));
+      }
+      if (startSession) startSession.disabled = entries.length === 0;
+      if (sessionAvailability) sessionAvailability.textContent = entries.length === 0 ? 'Checkbox practice is outside the training catalog.' : `${entries.length} challenges available.`;
+    }
+
     function updatePractice() {
       const mode = practiceMode?.value ?? 'full';
       sessionStorage.setItem('captcha-practice-mode', mode);
@@ -63,6 +136,7 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
       document.querySelectorAll<HTMLButtonElement>('[data-challenge]').forEach((button) => {
         button.disabled = mode !== 'full' && button.dataset.challenge !== compatible;
       });
+      updateSessionSettings();
     }
     if (practiceMode) {
       const savedMode = sessionStorage.getItem('captcha-practice-mode') ?? 'full';
@@ -75,6 +149,10 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
       practiceTile.addEventListener('change', updatePractice);
     }
     updatePractice();
+    sessionSplit?.addEventListener('change', updateSessionSettings);
+    sessionKind?.addEventListener('change', updateSessionSettings);
+    sessionCount?.addEventListener('change', updateSessionSettings);
+    trainingRatio?.addEventListener('change', updateSessionSettings);
     const contrast = document.querySelector<HTMLInputElement>('#high-contrast');
     if (contrast) {
       contrast.checked = localStorage.getItem('captcha-contrast') === 'high';
@@ -84,20 +162,101 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
         localStorage.setItem('captcha-contrast', mode);
       });
     }
-    let kind = 'image';
-    let complete = false;
-    let challengeIndex = 0;
     if (challengeNumber) {
       const savedSelection = sessionStorage.getItem('captcha-challenge-selection') ?? 'random';
-      const savedIndex = Number(savedSelection);
-      if (savedSelection === 'random' || (Number.isInteger(savedIndex) && savedIndex >= 0 && savedIndex < 10)) challengeNumber.value = savedSelection;
+      if (savedSelection === 'random' || trainingCatalog.some((entry) => `${entry.kind}:${entry.index}` === savedSelection)) challengeNumber.value = savedSelection;
+    }
+
+    function cancelSession() {
+      sessionStorage.removeItem('captcha-session-total');
+      generation += 1;
+      if (advanceTimer !== undefined) window.clearTimeout(advanceTimer);
+      advanceTimer = undefined;
+      queue = [];
+      queuePosition = 0;
+      pending = false;
+      if (sessionProgress) sessionProgress.hidden = true;
+    }
+
+    function showChallenge() {
+      if (!dialog || !checkboxStep) return;
+      dialog.dataset.phase = 'challenge';
+      checkboxStep.hidden = true;
+      const challenge = kind === 'slider' ? slider : image;
+      if (!challenge) return;
+      challenge.hidden = false;
+      const focusTarget = dialog.dataset.practice === 'tile' ? '.image-tile:not(:disabled)' : 'input:not(:disabled), button:not(:disabled)';
+      challenge.querySelector<HTMLElement>(focusTarget)?.focus();
+    }
+
+    async function launchChallenge(nextKind: ChallengeKind, index: number) {
+      if (!dialog || !checkbox || !checkboxStep || !image || !close) return;
+      const currentGeneration = ++generation;
+      kind = nextKind;
+      challengeIndex = index;
+      pending = false;
+      checkbox.disabled = false;
+      close.disabled = false;
+      checkbox.removeAttribute('data-success');
+      dialog.dataset.kind = kind;
+      const practice = practiceMode?.value ?? 'full';
+      sessionStorage.setItem('captcha-practice-mode', practice);
+      sessionStorage.setItem('captcha-practice-tile', practiceTile?.value ?? '0');
+      sessionStorage.setItem('captcha-challenge-index', String(challengeIndex));
+      const entry = queue.length > 0 ? queue[queuePosition] : trainingCatalog.find((item) => item.kind === kind && item.index === index);
+      if (entry) {
+        sessionStorage.setItem('captcha-challenge-id', entry.id);
+        sessionStorage.setItem('captcha-challenge-split', entry.split);
+      } else {
+        sessionStorage.removeItem('captcha-challenge-id');
+        sessionStorage.removeItem('captcha-challenge-split');
+      }
+      dialog.dataset.practice = practice;
+      dialog.dataset.practiceTile = practiceTile?.value ?? '0';
+      dialog.dataset.phase = 'checkbox';
+      const checkboxLabel = document.querySelector('#checkbox-label');
+      if (checkboxLabel) checkboxLabel.textContent = kind === 'image' ? "I'm not a robot" : 'Verify you are human';
+      document.dispatchEvent(new CustomEvent('challenge-select', { detail: { kind, index: challengeIndex } }));
+      document.dispatchEvent(new Event('challenge-reset'));
+      checkboxStep.hidden = false;
+      image.hidden = true;
+      if (slider) slider.hidden = true;
+      if (sessionProgress) sessionProgress.hidden = queue.length === 0;
+      if (sessionProgressLabel && queue.length > 0 && entry) sessionProgressLabel.textContent = `${queuePosition + 1}/${queue.length} · ${entry.split === 'train' ? 'Train' : 'Test'} · ${entry.id}`;
+      if (fullscreen?.checked && !document.fullscreenElement) {
+        await document.documentElement.requestFullscreen().catch(() => {
+          if (fullscreenStatus) fullscreenStatus.textContent = 'Fullscreen is unavailable. The challenge still works in this window.';
+        });
+      }
+      if (currentGeneration !== generation) return;
+      if (!dialog.open) dialog.showModal();
+      if (practice === 'tile' || practice === 'slider') showChallenge();
+      else checkbox.focus();
     }
 
     function finish() {
-      if (complete) return;
+      if (complete || pending || !dialog?.open) return;
+      if (queue.length > 0) {
+        pending = true;
+        const currentGeneration = generation;
+        advanceTimer = window.setTimeout(() => {
+          if (currentGeneration !== generation) return;
+          pending = false;
+          queuePosition += 1;
+          const next = queue[queuePosition];
+          if (next) {
+            void launchChallenge(next.kind, next.index);
+            return;
+          }
+          complete = true;
+          sessionStorage.setItem('captcha-session-total', String(queue.length));
+          sessionStorage.setItem('captcha-solved', kind);
+          window.location.assign('/verified/');
+        }, 300);
+        return;
+      }
       complete = true;
       sessionStorage.setItem('captcha-solved', kind);
-      sessionStorage.setItem('captcha-challenge-index', String(challengeIndex));
       window.location.assign('/verified/');
     }
 
@@ -107,87 +266,89 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
     checkCompleted();
     window.addEventListener('pageshow', checkCompleted);
 
-    if (dialog && checkbox && checkboxStep && image && close) {
-      document.querySelectorAll<HTMLButtonElement>('[data-challenge]').forEach((button) => {
-        button.addEventListener('click', async () => {
-          kind = button.dataset.challenge ?? 'image';
-          const selection = challengeNumber?.value ?? 'random';
-          challengeIndex = selection === 'random' ? Math.floor(Math.random() * 10) : Number(selection);
-          sessionStorage.setItem('captcha-challenge-selection', selection);
-          sessionStorage.setItem('captcha-challenge-index', String(challengeIndex));
-          checkbox.disabled = false;
-          close.disabled = false;
-          checkbox.removeAttribute('data-success');
-          dialog.dataset.kind = kind;
-          const practice = practiceMode?.value ?? 'full';
-          sessionStorage.setItem('captcha-practice-mode', practice);
-          sessionStorage.setItem('captcha-practice-tile', practiceTile?.value ?? '0');
-          dialog.dataset.practice = practice;
-          dialog.dataset.practiceTile = practiceTile?.value ?? '0';
-          dialog.dataset.phase = 'checkbox';
-          const checkboxLabel = document.querySelector('#checkbox-label');
-          if (checkboxLabel) checkboxLabel.textContent = kind === 'image' ? "I'm not a robot" : 'Verify you are human';
-          document.dispatchEvent(new CustomEvent('challenge-select', { detail: { kind, index: challengeIndex } }));
-          document.dispatchEvent(new Event('challenge-reset'));
-          checkboxStep.hidden = false;
-          image.hidden = true;
-          if (slider) slider.hidden = true;
-          if (fullscreen?.checked && !document.fullscreenElement) {
-            await document.documentElement.requestFullscreen().catch(() => {
-              if (fullscreenStatus) fullscreenStatus.textContent = 'Fullscreen is unavailable. The challenge still works in this window.';
-            });
-          }
-          dialog.showModal();
-          if (practice === 'tile' || practice === 'slider') {
-            dialog.dataset.phase = 'challenge';
-            checkboxStep.hidden = true;
-            const challenge = kind === 'slider' ? slider : image;
-            if (challenge) {
-              challenge.hidden = false;
-              challenge.querySelector<HTMLElement>('input:not(:disabled), button:not(:disabled)')?.focus();
-            }
-          }
-        });
+    document.querySelectorAll<HTMLButtonElement>('[data-challenge]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const nextKind = button.dataset.challenge;
+        if (nextKind !== 'image' && nextKind !== 'slider' && nextKind !== 'turnstile') return;
+        cancelSession();
+        sessionStorage.removeItem('captcha-session-total');
+        const selection = challengeNumber?.value ?? 'random';
+        sessionStorage.setItem('captcha-challenge-selection', selection);
+        const entries = trainingCatalog.filter((entry) => entry.kind === nextKind);
+        const selected = entries.find((entry) => `${entry.kind}:${entry.index}` === selection);
+        const entry = selected ?? entries[Math.floor(Math.random() * entries.length)];
+        void launchChallenge(nextKind, entry?.index ?? 0);
       });
-      checkbox.addEventListener('click', () => {
-        if (kind === 'turnstile') {
-          checkbox.disabled = true;
-          close.disabled = true;
-          checkbox.dataset.success = 'true';
-          const label = document.querySelector('#checkbox-label');
-          if (label) label.textContent = 'Success!';
-          window.setTimeout(finish, 500);
-          return;
+    });
+
+    startSession?.addEventListener('click', () => {
+      updateSessionSettings();
+      const entries = availableEntries();
+      if (entries.length === 0) return;
+      cancelSession();
+      sessionStorage.removeItem('captcha-session-total');
+      // Fisher–Yates keeps every catalog entry equally likely without repeats.
+      for (let index = entries.length - 1; index > 0; index -= 1) {
+        const swapIndex = Math.floor(Math.random() * (index + 1));
+        const current = entries[index];
+        const other = entries[swapIndex];
+        if (current && other) {
+          entries[index] = other;
+          entries[swapIndex] = current;
         }
-        dialog.dataset.phase = 'challenge';
-        checkboxStep.hidden = true;
-        const challenge = kind === 'slider' ? slider : image;
-        if (challenge) {
-          challenge.hidden = false;
-          challenge.querySelector<HTMLElement>('input:not(:disabled), button:not(:disabled)')?.focus();
-        }
-      });
-      close.addEventListener('click', () => dialog.close());
-      dialog.addEventListener('cancel', (event) => {
-        if (close.disabled) event.preventDefault();
-      });
-      dialog.addEventListener('close', () => {
-        if (document.fullscreenElement) document.exitFullscreen();
-      });
-      document.addEventListener('challenge-state', (event) => {
-        if (!(event instanceof CustomEvent) || complete) return;
-        const detail: unknown = event.detail;
-        if (typeof detail !== 'object' || detail === null || !('state' in detail) || !('kind' in detail)) return;
-        if (detail.state === 'success' && detail.kind === kind) {
-          finish();
-        }
-      });
-    }
+      }
+      queue = entries.slice(0, Number(sessionCount?.value ?? '100'));
+      queuePosition = 0;
+      const first = queue[0];
+      if (first) void launchChallenge(first.kind, first.index);
+    });
+
+    checkbox?.addEventListener('click', () => {
+      if (kind === 'turnstile' && checkbox && close) {
+        checkbox.disabled = true;
+        close.disabled = true;
+        checkbox.dataset.success = 'true';
+        const label = document.querySelector('#checkbox-label');
+        if (label) label.textContent = 'Success!';
+        advanceTimer = window.setTimeout(finish, 500);
+        return;
+      }
+      showChallenge();
+    });
+    close?.addEventListener('click', () => dialog?.close());
+    document.querySelector('#stop-session')?.addEventListener('click', () => {
+      cancelSession();
+      dialog?.close();
+    });
+    dialog?.addEventListener('cancel', (event) => {
+      if (close?.disabled) event.preventDefault();
+      else cancelSession();
+    });
+    dialog?.addEventListener('close', () => {
+      cancelSession();
+      if (document.fullscreenElement) void document.exitFullscreen();
+    });
+    document.addEventListener('challenge-state', (event) => {
+      if (!(event instanceof CustomEvent)) return;
+      const detail: unknown = event.detail;
+      if (typeof detail !== 'object' || detail === null || !('state' in detail) || !('kind' in detail)) return;
+      if (detail.state === 'success' && detail.kind === kind) finish();
+    });
   </script>
   <style>
     .site-header { display: flex; justify-content: space-between; gap: 20px; padding: 24px 36px; border-bottom: 1px solid var(--line); font-size: .85rem; }
     .site-header a { text-decoration: none; font-weight: 600; }
-    .selection { max-width: 640px; margin: 12vh auto; padding: 0 24px; }
+    .selection { display: grid; grid-template-columns: minmax(0, 592px) 280px; gap: 64px; max-width: 984px; margin: 8vh auto; padding: 0 24px; align-items: start; }
+    .session-panel { border-left: 1px solid var(--line); padding-left: 24px; }
+    .session-panel h2 { margin: 0; font-size: 1.2rem; }
+    .session-panel p { font-size: .8rem; }
+    .session-panel label { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; font-size: .85rem; }
+    .session-panel select, .session-panel input { width: 140px; min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 3px; font: inherit; background: #fff; color: var(--text); }
+    .session-panel .button { width: 100%; margin-top: 8px; }
+    .session-panel .button:disabled { opacity: .45; cursor: default; }
+    #session-progress { position: fixed; left: 24px; right: 24px; bottom: 20px; display: flex; justify-content: space-between; align-items: center; gap: 16px; pointer-events: none; font-size: 13px; color: #111; }
+    #session-progress-label { padding: 8px 12px; background: #fff; border: 1px solid #ccc; border-radius: 3px; }
+    #stop-session { pointer-events: auto; padding: 8px 12px; background: #fff; color: #111; border: 1px solid #aaa; border-radius: 3px; font: inherit; }
     h1 { font-size: 2rem; margin: 0 0 12px; }
     .choices { display: grid; gap: 12px; margin: 32px 0 24px; }
     .choice { display: grid; grid-template-columns: 1fr auto; gap: 8px 24px; text-align: left; padding: 22px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--text); }
@@ -238,6 +399,7 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
     :global([data-contrast='high']) #human-checkbox { border-color: #000; background: #fff; }
     :global([data-contrast='high']) .checkbox-box { border-color: #000; }
     :global([data-contrast='high']) .widget-brand { color: #000; }
+    @media (max-width: 800px) { .selection { grid-template-columns: minmax(0, 1fr); max-width: 640px; gap: 40px; } .session-panel { border-left: 0; border-top: 1px solid var(--line); padding: 24px 0 0; } #session-progress { left: 12px; right: 12px; bottom: 12px; font-size: 11px; } }
     @media (max-width: 480px) { .selection { margin-top: 8vh; } }
   </style>
 </Page>

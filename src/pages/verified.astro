@@ -11,6 +11,8 @@ import Page from '../layouts/Page.astro';
     <button id="restart" class="button primary">Start again</button>
   </main>
   <script>
+    import { imageChallenges } from '../data/image-challenges';
+    import { sliderChallenges } from '../data/slider-challenges';
     const kind = sessionStorage.getItem('captcha-solved');
     if (kind !== 'image' && kind !== 'slider' && kind !== 'turnstile') {
       window.location.replace('/');
@@ -24,11 +26,16 @@ import Page from '../layouts/Page.astro';
         : kind === 'turnstile' ? 'Cloudflare Turnstile verification' : `${kind} challenge`;
       const variant = document.querySelector('#solved-variant');
       const index = Number(sessionStorage.getItem('captcha-challenge-index') ?? '0');
-      if (variant && kind !== 'turnstile' && Number.isInteger(index) && index >= 0 && index < 10) variant.textContent = ` ${index + 1}`;
+      const total = Number(sessionStorage.getItem('captcha-session-total') ?? '0');
+      const count = kind === 'image' ? imageChallenges.length : sliderChallenges.length;
+      if (total > 0 && Number.isInteger(total)) {
+        if (label) label.textContent = `a session of ${total} tasks`;
+      } else if (variant && kind !== 'turnstile' && Number.isInteger(index) && index >= 0 && index < count) variant.textContent = ` ${index + 1}`;
       if (main) main.hidden = false;
     }
     document.querySelector('#restart')?.addEventListener('click', () => {
       sessionStorage.removeItem('captcha-solved');
+      sessionStorage.removeItem('captcha-session-total');
       window.location.replace('/');
     });
   </script>

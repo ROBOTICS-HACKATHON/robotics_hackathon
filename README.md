@@ -9,7 +9,7 @@ mise run dev
 
 Open http://localhost:4321. Build with `mise run build`.
 
-Choose one of ten numbered image grids or slider puzzles, or the checkbox-only
+Choose one of 200 photo puzzles (100 image grids and 100 sliders), or the checkbox-only
 Turnstile mock. Then click the verification checkbox. The challenge
 opens over a blurred page. "Open fullscreen" uses browser fullscreen when available.
 Solving navigates to `/verified/` and keeps the completed challenge locked until
@@ -43,6 +43,16 @@ Drag and release the slider to verify; arrow keys work too.
 Use the challenge number to repeat a setup while recording robot demonstrations.
 Choose "Random" to pick a variant each time a challenge opens. "Start again"
 keeps Random selected; resetting an open puzzle keeps its current variant.
+The default 80/20 split has 160 training puzzles and 40 held-out test puzzles.
+Test photos are separate from training photos at that default ratio. The training
+percentage is configurable; custom percentages split tasks and can share photos
+across the resulting pools.
+Use the training side panel to choose a split, task type, and count. A session
+advances automatically after each success and ends after the chosen number of tasks.
+The default count is 100 tasks, suitable for consecutive screenshot-based solving.
+Stopping or closing the challenge cancels the session. Sessions sample without
+replacement and do not mix the training and test splits.
+Photos are served as AVIF, converted locally with ImageMagick at quality 55.
 The site supplies the tasks and answer labels; it does not record camera frames
 or robot actions. Those recordings are needed to train the robot policy.
 
