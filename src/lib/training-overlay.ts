@@ -1,4 +1,6 @@
-type Target = { label: string; element: HTMLElement; bounds: DOMRect };
+type Detail = 'all' | 'markers' | 'coordinates' | 'distances';
+type Focus = 'all' | 'checkbox' | 'verify' | 'slider' | `tile-${number}`;
+type Target = { label: string; focus: Focus; element: HTMLElement; bounds: DOMRect };
 type Point = { x: number; y: number };
 
 const preference = 'captcha-training-overlay';
@@ -11,12 +13,28 @@ function crosshair({ x, y }: Point, size = 7): string {
   return `<path d="M${x - size} ${y}H${x + size}M${x} ${y - size}V${y + size}" />`;
 }
 
-function label(text: string, x: number, y: number): string {
-  return `<text x="${x}" y="${y}">${text}</text>`;
+function stored(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
 }
 
-function labelLines(lines: readonly string[], x: number, y: number): string {
-  return `<text x="${x}" y="${y}">${lines.map((line, index) => `<tspan x="${x}" dy="${index === 0 ? 0 : 12}">${line}</tspan>`).join('')}</text>`;
+function persist(key: string, value: string): void {
+  try { localStorage.setItem(key, value); } catch { /* Settings still work without storage. */ }
+}
+
+function isDetail(value: string | null): value is Detail {
+  return ['all', 'markers', 'coordinates', 'distances'].some((mode) => mode === value);
+}
+
+function isFocus(value: string | null): value is Focus {
+  return value !== null && (['all', 'checkbox', 'verify', 'slider'].includes(value) || /^tile-[1-9]$/.test(value));
+}
+
+function panel(lines: readonly string[], x: number, y: number, maxWidth = 220): string {
+  const width = Math.min(maxWidth, Math.max(...lines.map((line) => line.length)) * 7 + 10);
+  const height = lines.length * 15 + 8;
+  const left = Math.max(0, Math.min(x, window.innerWidth - width));
+  const top = Math.max(0, Math.min(y, window.innerHeight - height));
+  return `<svg x="${left}" y="${top}" width="${width}" height="${height}" overflow="hidden"><rect width="${width}" height="${height}" fill="#000" stroke="#fff" stroke-width="1" /><text x="5" y="16" fill="#fff" font-family="monospace" font-size="11" font-weight="700">${lines.map((line, index) => `<tspan x="5" dy="${index === 0 ? 0 : 15}">${line}</tspan>`).join('')}</text></svg>`;
 }
 
 function box(bounds: DOMRect, target?: string): string {
@@ -39,10 +57,17 @@ export function initializeTrainingOverlay(): void {
   const dialog = dialogElement;
   const svg = svgElement;
   const readout = readoutElement;
+  const detailSelect = document.querySelector<HTMLSelectElement>('#training-overlay-detail');
+  const focusSelect = document.querySelector<HTMLSelectElement>('#training-overlay-focus');
 
-  let enabled = false;
-  try { enabled = localStorage.getItem(preference) === 'on'; } catch { /* Storage may be unavailable. */ }
+  let enabled = stored(preference) === 'on';
+  const savedDetail = stored(`${preference}-detail`);
+  const savedFocus = stored(`${preference}-focus`);
+  let detail: Detail = isDetail(savedDetail) ? savedDetail : 'all';
+  let focus: Focus = isFocus(savedFocus) ? savedFocus : 'all';
   toggle.checked = enabled;
+  if (detailSelect) detailSelect.value = detail;
+  if (focusSelect) focusSelect.value = focus;
   let pointer: Point | undefined;
   let frame = 0;
 
@@ -51,19 +76,21 @@ export function initializeTrainingOverlay(): void {
   }
 
   function targets(): Target[] {
-    const candidates: { label: string; element: HTMLElement | null }[] = Array.from(
+    const candidates: { label: string; focus: Focus; element: HTMLElement | null }[] = Array.from(
       dialog.querySelectorAll<HTMLButtonElement>('#image-challenge .image-tile'),
-      (element, index) => ({ label: `Tile ${index + 1}`, element }),
+      (element, index) => ({ label: `Tile ${index + 1}`, focus: `tile-${index + 1}`, element }),
     );
-    for (const [selector, name] of [
-      ['#image-challenge .verify-button', 'Verify'],
-      ['#image-challenge .reset-button', 'Reset'],
-      ['.checkbox-box', 'Checkbox'],
-      ['#puzzle-slider', 'Slider track'],
-      ['.reset-slider', 'Reset'],
-    ]) candidates.push({ label: name, element: dialog.querySelector<HTMLElement>(selector) });
-    return candidates.flatMap(({ label, element }) => element && visible(element)
-      ? [{ label, element, bounds: element.getBoundingClientRect() }] : []);
+    for (const [selector, name, targetFocus] of [
+      ['#image-challenge .verify-button', 'Verify', 'verify'],
+      ['#image-challenge .reset-button', 'Reset', 'all'],
+      ['.checkbox-box', 'Checkbox', 'checkbox'],
+      ['#puzzle-slider', 'Slider track', 'slider'],
+      ['.reset-slider', 'Reset', 'slider'],
+    ] as const) candidates.push({ label: name, focus: targetFocus, element: dialog.querySelector<HTMLElement>(selector) });
+    return candidates.flatMap(({ label, focus: targetFocus, element }) => element && visible(element)
+      && !(targetFocus.startsWith('tile-') && element instanceof HTMLButtonElement && element.disabled)
+      && (focus === 'all' || targetFocus === focus)
+      ? [{ label, focus: targetFocus, element, bounds: element.getBoundingClientRect() }] : []);
   }
 
   function render(): void {
@@ -72,33 +99,36 @@ export function initializeTrainingOverlay(): void {
     const width = window.innerWidth;
     const height = window.innerHeight;
     const activeTargets = targets();
+    const coordinates = detail === 'all' || detail === 'coordinates';
+    const distances = detail === 'all' || detail === 'distances';
+    const showSlider = focus === 'all' || focus === 'slider';
     const shapes: string[] = [];
     const captions: string[] = [];
-    const lines = [`Viewport ${width} × ${height} CSS px · DPR ${window.devicePixelRatio.toFixed(2)}`, 'Origin (0,0) top-left · labels x,y (x/W,y/H)'];
+    const lines = [`Viewport ${width} × ${height} CSS px · DPR ${window.devicePixelRatio.toFixed(2)}`];
+    if (coordinates) lines.push('Origin (0,0) top-left · x,y (x/W,y/H)');
     for (const [index, point] of [
       { x: 12, y: 12 }, { x: width - 12, y: 12 },
       { x: 12, y: height - 12 }, { x: width - 12, y: height - 12 },
     ].entries()) {
       shapes.push(crosshair(point, 10));
-      captions.push(label(['TL', 'TR', 'BL', 'BR'][index], index % 2 ? width - 40 : 24, point.y + 4));
+      captions.push(panel([['TL', 'TR', 'BL', 'BR'][index]], index % 2 ? width - 48 : 24, point.y - 11));
     }
 
     for (const target of activeTargets) {
       const point = center(target.bounds);
       shapes.push(box(target.bounds, target.label), crosshair(point));
-      if (target.label.startsWith('Tile ')) {
-        captions.push(labelLines([
-          target.label,
-          `${Math.round(point.x)},${Math.round(point.y)} px`,
+      if (target.focus.startsWith('tile-')) {
+        captions.push(panel(coordinates ? [
+          target.label, `${Math.round(point.x)},${Math.round(point.y)} px`,
           `(${(point.x / width).toFixed(3)},${(point.y / height).toFixed(3)})`,
-        ], target.bounds.left + 3, target.bounds.top + 12));
+        ] : [target.label], target.bounds.left + 3, target.bounds.top + 3, target.bounds.width - 6));
       } else {
-        captions.push(label(target.label, target.bounds.left + 3, target.bounds.top - 4));
-        lines.push(`${target.label}: ${pointLabel(point, width, height)}`);
+        captions.push(panel([target.label], target.bounds.left + 3, target.bounds.top - 25));
+        if (coordinates) lines.push(`${target.label}: ${pointLabel(point, width, height)}`);
       }
     }
     const slider = dialog.querySelector<HTMLInputElement>('#puzzle-slider');
-    if (slider && visible(slider)) {
+    if (showSlider && slider && visible(slider)) {
       const bounds = slider.getBoundingClientRect();
       const thumbWidth = Number.parseFloat(getComputedStyle(slider).getPropertyValue('--slider-thumb-width'));
       const min = Number(slider.min);
@@ -110,22 +140,25 @@ export function initializeTrainingOverlay(): void {
           y: bounds.top + bounds.height / 2,
         };
         shapes.push(crosshair(handle, 10));
-        captions.push(label('Handle', handle.x + 5, handle.y - 12));
-        lines.push(`Slider handle: ${pointLabel(handle, width, height)}`);
+        captions.push(panel(['Handle'], handle.x + 5, handle.y - 32));
+        if (coordinates) lines.push(`Slider handle: ${pointLabel(handle, width, height)}`);
       }
     }
     const piece = dialog.querySelector<HTMLElement>('.puzzle-piece');
     const gap = dialog.querySelector<HTMLElement>('.puzzle-gap');
-    if (piece && gap && visible(piece) && visible(gap)) {
+    if (showSlider && piece && gap && visible(piece) && visible(gap)) {
       const pieceBounds = piece.getBoundingClientRect();
       const gapBounds = gap.getBoundingClientRect();
       const pieceCenter = center(pieceBounds);
       const gapCenter = center(gapBounds);
       shapes.push(box(pieceBounds, 'Piece'), box(gapBounds, 'Gap'), crosshair(pieceCenter), crosshair(gapCenter));
-      shapes.push(`<path d="M${pieceCenter.x} ${pieceCenter.y}L${gapCenter.x} ${gapCenter.y}" />`);
-      captions.push(label(`Piece ${pointLabel(pieceCenter, width, height)}`, pieceBounds.left, pieceBounds.bottom + 12));
-      captions.push(label(`Gap ${pointLabel(gapCenter, width, height)}`, gapBounds.left, gapBounds.top - 5));
-      lines.push(`Piece → gap dx ${(gapBounds.left - pieceBounds.left).toFixed(1)} px · distance ${Math.hypot(gapCenter.x - pieceCenter.x, gapCenter.y - pieceCenter.y).toFixed(1)} px`);
+      captions.push(panel(['Piece'], pieceBounds.left, pieceBounds.bottom + 3));
+      captions.push(panel(['Gap'], gapBounds.left, gapBounds.top - 25));
+      if (coordinates) lines.push(`Piece: ${pointLabel(pieceCenter, width, height)}`, `Gap: ${pointLabel(gapCenter, width, height)}`);
+      if (distances) {
+        shapes.push(`<path d="M${pieceCenter.x} ${pieceCenter.y}L${gapCenter.x} ${gapCenter.y}" />`);
+        lines.push(`Piece → gap dx ${(gapBounds.left - pieceBounds.left).toFixed(1)} px · distance ${Math.hypot(gapCenter.x - pieceCenter.x, gapCenter.y - pieceCenter.y).toFixed(1)} px`);
+      }
     }
     if (pointer) {
       const currentPointer = pointer;
@@ -138,16 +171,16 @@ export function initializeTrainingOverlay(): void {
         const b = center(best.bounds);
         return Math.hypot(a.x - currentPointer.x, a.y - currentPointer.y) < Math.hypot(b.x - currentPointer.x, b.y - currentPointer.y) ? target : best;
       }, undefined);
-      lines.push(`Pointer ${pointLabel(pointer, width, height)}`);
-      if (nearest) {
+      if (coordinates) lines.push(`Pointer ${pointLabel(pointer, width, height)}`);
+      if (distances && nearest) {
         const point = center(nearest.bounds);
         const distance = Math.hypot(point.x - pointer.x, point.y - pointer.y);
         shapes.push(`<path d="M${pointer.x} ${pointer.y}L${point.x} ${point.y}" />`);
         lines.push(`${hovered ? 'Hovered' : 'Nearest'} ${nearest.label} · center distance ${distance.toFixed(1)} px`);
       }
-    } else lines.push('Pointer: move over the viewport to measure');
+    } else if (distances) lines.push('Move pointer to measure target distance');
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-    svg.innerHTML = `<g fill="none" stroke="#000" stroke-width="3">${shapes.join('')}</g><g fill="none" stroke="#fff" stroke-width="1">${shapes.join('')}</g><g fill="#fff" stroke="#000" stroke-width="3" paint-order="stroke" font-family="monospace" font-size="10">${captions.join('')}</g>`;
+    svg.innerHTML = `<g fill="none" stroke="#000" stroke-width="7">${shapes.join('')}</g><g fill="none" stroke="#ffe600" stroke-width="3">${shapes.join('')}</g>${captions.join('')}`;
     readout.textContent = lines.join('\n');
   }
 
@@ -165,8 +198,20 @@ export function initializeTrainingOverlay(): void {
 
   toggle.addEventListener('change', () => {
     enabled = toggle.checked;
-    try { localStorage.setItem(preference, enabled ? 'on' : 'off'); } catch { /* The toggle still works without storage. */ }
+    persist(preference, enabled ? 'on' : 'off');
     sync();
+  });
+  detailSelect?.addEventListener('change', () => {
+    if (!isDetail(detailSelect.value)) return;
+    detail = detailSelect.value;
+    persist(`${preference}-detail`, detail);
+    schedule();
+  });
+  focusSelect?.addEventListener('change', () => {
+    if (!isFocus(focusSelect.value)) return;
+    focus = focusSelect.value;
+    persist(`${preference}-focus`, focus);
+    schedule();
   });
   document.addEventListener('pointermove', (event) => {
     if (!enabled || !dialog.open) return;
