@@ -15,6 +15,7 @@ const imageChallenge = imageChallenges[0];
       <button type="button" class="image-tile" data-tile-index={index} aria-pressed="false">
         <img src={tile.src} alt={tile.alt} width="240" height="240" draggable="false" />
         <span class="selection-mark" aria-hidden="true">✓</span>
+        <span class="practice-tag">Click this tile</span>
       </button>
     ))}
   </div>
@@ -48,6 +49,7 @@ const imageChallenge = imageChallenges[0];
     let activeChallenge: ImageChallenge = imageChallenges[0];
     const selected = new Set<number>();
     let state: 'idle' | 'success' | 'error' = 'idle';
+    let practiceTile: number | undefined;
 
     function setState(next: 'idle' | 'success' | 'error') {
       state = next;
@@ -60,19 +62,44 @@ const imageChallenge = imageChallenges[0];
 
     function reset() {
       selected.clear();
-      for (const tile of tiles) {
-        tile.setAttribute('aria-pressed', 'false');
-        tile.disabled = false;
+      const dialog = section?.closest('dialog');
+      const target = Number(dialog?.dataset.practiceTile ?? '0');
+      practiceTile = undefined;
+      if (dialog?.dataset.practice === 'tile') {
+        practiceTile = Number.isInteger(target) && target >= 0 && target < tiles.length ? target : 0;
       }
-      if (status) status.textContent = 'No images selected.';
+      section?.toggleAttribute('data-practice', practiceTile !== undefined);
+      if (instruction) instruction.textContent = practiceTile === undefined
+        ? activeChallenge.instruction : 'Click the highlighted tile.';
+      if (subject) {
+        subject.textContent = activeChallenge.subject;
+        subject.hidden = practiceTile !== undefined;
+      }
+      for (const [index, tile] of tiles.entries()) {
+        tile.setAttribute('aria-pressed', 'false');
+        tile.disabled = practiceTile !== undefined && index !== practiceTile;
+        tile.toggleAttribute('data-practice-target', index === practiceTile);
+      }
+      if (status) status.textContent = practiceTile === undefined ? 'No images selected.' : 'Click the highlighted tile to complete practice.';
       if (count) count.textContent = `0 / ${tiles.length}`;
-      if (verify) verify.disabled = false;
+      if (verify) {
+        verify.disabled = false;
+        verify.hidden = practiceTile !== undefined;
+      }
       setState('idle');
     }
 
     tiles.forEach((tile, index) => {
       tile.addEventListener('click', () => {
         if (state === 'success') return;
+        if (practiceTile !== undefined) {
+          if (index !== practiceTile) return;
+          tile.setAttribute('aria-pressed', 'true');
+          status.textContent = 'Verified. Target clicked.';
+          for (const button of tiles) button.disabled = true;
+          setState('success');
+          return;
+        }
         if (selected.has(index)) selected.delete(index);
         else selected.add(index);
         tile.setAttribute('aria-pressed', String(selected.has(index)));
@@ -263,5 +290,30 @@ const imageChallenge = imageChallenges[0];
 
   .verify-button:hover { background: #185abc; }
   .image-tile:disabled { cursor: default; }
+  .practice-tag { display: none; }
+  [data-practice] .image-tile:disabled:not([data-practice-target]) { opacity: .4; }
+  .image-tile[data-practice-target]::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: 4px solid #000;
+    box-shadow: inset 0 0 0 2px #fff;
+    pointer-events: none;
+  }
+  [data-practice-target] .practice-tag {
+    display: block;
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
+    padding: 5px 2px;
+    border: 1px solid #fff;
+    background: #000;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+    pointer-events: none;
+  }
   .verify-button:disabled { cursor: default; background: #8ab4f8; }
 </style>

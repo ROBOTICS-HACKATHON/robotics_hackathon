@@ -24,6 +24,12 @@ top-left corner and use CSS pixels; normalized coordinates range from 0 to 1.
 The slider shows the piece's horizontal offset from the gap. Markers update when
 the window changes size or the slider moves, and do not intercept clicks.
 These are screen measurements, not physical distances or camera coordinates.
+Expand "Training settings" to show only markers, coordinates, or distances,
+and focus the overlay on one target. Labels use solid backgrounds for contrast.
+
+Practice modes isolate a checkbox click, a chosen tile click, or a slider drag.
+Tile and slider practice open directly, skipping the first checkbox. Full flow
+keeps the complete challenge. The chosen mode and tile are remembered per tab.
 
 Change prompts, image paths, and `correct` values in `src/data/image-challenges.ts`.
 Put your images in `public/images/`; the grid expects nine tiles. The included

@@ -18,6 +18,13 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
     <label class="fullscreen-option"><input type="checkbox" id="high-contrast" /> High contrast</label>
     <label class="fullscreen-option"><input type="checkbox" id="training-overlay-toggle" /> Training overlay</label>
     <p class="overlay-hint muted">Screen coordinates and distances in pixels.</p>
+    <details class="training-settings">
+      <summary>Training settings</summary>
+      <label for="practice-mode">Practice<select id="practice-mode"><option value="full">Full flow</option><option value="tile">One tile click</option><option value="slider">Slider only</option><option value="checkbox">Checkbox only</option></select></label>
+      <label id="practice-tile-option" for="practice-tile" hidden>Tile<select id="practice-tile">{Array.from({ length: 9 }, (_, index) => <option value={index}>{index + 1}</option>)}</select></label>
+      <label for="training-overlay-detail">Show<select id="training-overlay-detail"><option value="all">All</option><option value="markers">Markers</option><option value="coordinates">Coordinates</option><option value="distances">Distances</option></select></label>
+      <label for="training-overlay-focus">Target<select id="training-overlay-focus"><option value="all">All targets</option><option value="checkbox">Checkbox</option>{Array.from({ length: 9 }, (_, index) => <option value={`tile-${index + 1}`}>Tile {index + 1}</option>)}<option value="verify">Verify</option><option value="slider">Slider</option></select></label>
+    </details>
     <p id="fullscreen-status" class="muted" role="status"></p>
   </main>
   <dialog id="challenge-dialog" data-phase="checkbox" aria-label="Human verification">
@@ -44,6 +51,30 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
     const fullscreen = document.querySelector<HTMLInputElement>('#fullscreen');
     const fullscreenStatus = document.querySelector<HTMLElement>('#fullscreen-status');
     const challengeNumber = document.querySelector<HTMLSelectElement>('#challenge-number');
+    const practiceMode = document.querySelector<HTMLSelectElement>('#practice-mode');
+    const practiceTile = document.querySelector<HTMLSelectElement>('#practice-tile');
+    const practiceTileOption = document.querySelector<HTMLElement>('#practice-tile-option');
+    function updatePractice() {
+      const mode = practiceMode?.value ?? 'full';
+      sessionStorage.setItem('captcha-practice-mode', mode);
+      sessionStorage.setItem('captcha-practice-tile', practiceTile?.value ?? '0');
+      if (practiceTileOption) practiceTileOption.hidden = mode !== 'tile';
+      const compatible = mode === 'tile' ? 'image' : mode === 'slider' ? 'slider' : 'turnstile';
+      document.querySelectorAll<HTMLButtonElement>('[data-challenge]').forEach((button) => {
+        button.disabled = mode !== 'full' && button.dataset.challenge !== compatible;
+      });
+    }
+    if (practiceMode) {
+      const savedMode = sessionStorage.getItem('captcha-practice-mode') ?? 'full';
+      if (['full', 'tile', 'slider', 'checkbox'].includes(savedMode)) practiceMode.value = savedMode;
+      practiceMode.addEventListener('change', updatePractice);
+    }
+    if (practiceTile) {
+      const savedTile = Number(sessionStorage.getItem('captcha-practice-tile') ?? '0');
+      if (Number.isInteger(savedTile) && savedTile >= 0 && savedTile < 9) practiceTile.value = String(savedTile);
+      practiceTile.addEventListener('change', updatePractice);
+    }
+    updatePractice();
     const contrast = document.querySelector<HTMLInputElement>('#high-contrast');
     if (contrast) {
       contrast.checked = localStorage.getItem('captcha-contrast') === 'high';
@@ -88,6 +119,11 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
           close.disabled = false;
           checkbox.removeAttribute('data-success');
           dialog.dataset.kind = kind;
+          const practice = practiceMode?.value ?? 'full';
+          sessionStorage.setItem('captcha-practice-mode', practice);
+          sessionStorage.setItem('captcha-practice-tile', practiceTile?.value ?? '0');
+          dialog.dataset.practice = practice;
+          dialog.dataset.practiceTile = practiceTile?.value ?? '0';
           dialog.dataset.phase = 'checkbox';
           const checkboxLabel = document.querySelector('#checkbox-label');
           if (checkboxLabel) checkboxLabel.textContent = kind === 'image' ? "I'm not a robot" : 'Verify you are human';
@@ -102,6 +138,15 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
             });
           }
           dialog.showModal();
+          if (practice === 'tile' || practice === 'slider') {
+            dialog.dataset.phase = 'challenge';
+            checkboxStep.hidden = true;
+            const challenge = kind === 'slider' ? slider : image;
+            if (challenge) {
+              challenge.hidden = false;
+              challenge.querySelector<HTMLElement>('input:not(:disabled), button:not(:disabled)')?.focus();
+            }
+          }
         });
       });
       checkbox.addEventListener('click', () => {
@@ -119,7 +164,7 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
         const challenge = kind === 'slider' ? slider : image;
         if (challenge) {
           challenge.hidden = false;
-          challenge.querySelector<HTMLElement>('input, button')?.focus();
+          challenge.querySelector<HTMLElement>('input:not(:disabled), button:not(:disabled)')?.focus();
         }
       });
       close.addEventListener('click', () => dialog.close());
@@ -147,6 +192,7 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
     .choices { display: grid; gap: 12px; margin: 32px 0 24px; }
     .choice { display: grid; grid-template-columns: 1fr auto; gap: 8px 24px; text-align: left; padding: 22px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--text); }
     .choice:hover { border-color: var(--text); }
+    .choice:disabled { opacity: .45; cursor: default; }
     .choice strong { font-weight: 550; }
     .choice span:first-of-type { grid-row: 2; font-size: .85rem; color: var(--muted); }
     .choice span:last-child { grid-row: 1 / 3; grid-column: 2; align-self: center; }
@@ -156,6 +202,10 @@ import TrainingOverlay from '../components/TrainingOverlay.astro';
     .fullscreen-option + .fullscreen-option { margin-top: 12px; }
     .fullscreen-option input { width: 19px; height: 19px; accent-color: var(--accent); }
     .overlay-hint { margin: 6px 0 0 29px; font-size: .75rem; }
+    .training-settings { margin: 12px 0 0 29px; font-size: .8rem; }
+    .training-settings summary { cursor: pointer; }
+    .training-settings label { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 260px; margin-top: 12px; }
+    .training-settings select { min-width: 130px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 3px; background: #fff; color: var(--text); }
     .demo-note { margin-top: 40px; font-size: .8rem; }
     #fullscreen-status { font-size: .8rem; }
     dialog { width: min(400px, calc(100% - 32px)); max-height: calc(100dvh - 64px); padding: 0; border: 1px solid #ccc; border-radius: 3px; background: #fff; color: #111; font-family: Arial, sans-serif; overflow: visible; }

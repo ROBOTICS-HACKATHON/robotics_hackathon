@@ -6,7 +6,7 @@ import Page from '../layouts/Page.astro';
     <span class="check" aria-hidden="true">✓</span>
     <p class="muted">Verification complete</p>
     <h1>Access granted.</h1>
-    <p>You solved the <span id="solved-kind">image</span> challenge<span id="solved-variant"></span>. Welcome to the website.</p>
+    <p>You completed <span id="solved-kind">image</span><span id="solved-variant"></span>. Welcome to the website.</p>
     <button class="button" disabled>Verified</button>
     <button id="restart" class="button primary">Start again</button>
   </main>
@@ -17,7 +17,11 @@ import Page from '../layouts/Page.astro';
     } else {
       const label = document.querySelector('#solved-kind');
       const main = document.querySelector('main');
-      if (label) label.textContent = kind === 'turnstile' ? 'Cloudflare Turnstile' : kind;
+      const practice = sessionStorage.getItem('captcha-practice-mode');
+      if (label) label.textContent = practice === 'tile' ? 'single tile practice'
+        : practice === 'slider' ? 'slider practice'
+        : practice === 'checkbox' ? 'checkbox practice'
+        : kind === 'turnstile' ? 'Cloudflare Turnstile verification' : `${kind} challenge`;
       const variant = document.querySelector('#solved-variant');
       const index = Number(sessionStorage.getItem('captcha-challenge-index') ?? '0');
       if (variant && kind !== 'turnstile' && Number.isInteger(index) && index >= 0 && index < 10) variant.textContent = ` ${index + 1}`;
