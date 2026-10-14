@@ -1,0 +1,522 @@
+---
+import Page from '../layouts/Page.astro';
+import ImageChallenge from './ImageChallenge.astro';
+import SliderChallenge from './SliderChallenge.astro';
+import TrainingOverlay from './TrainingOverlay.astro';
+import Minesweeper from './Minesweeper.astro';
+import { trainingCatalog } from '../data/training-catalog';
+interface Props { demo?: boolean }
+const { demo = false } = Astro.props;
+---
+<Page title={demo ? 'Minesweeper · CAPTCHA demo' : 'Human verification'}>
+  {demo ? <Minesweeper /> : <main class="selection">
+    <section class="single-challenge">
+    <h1>Access website</h1>
+    <p class="muted">Local robot demo. Choose a verification challenge.</p>
+    <div class="choices">
+      <button class="choice" data-challenge="image"><strong>reCAPTCHA</strong><span>Image grid</span><span aria-hidden="true">→</span></button>
+      <button class="choice" data-challenge="slider"><strong>GeeTest slider</strong><span>Slide the piece into the gap.</span><span aria-hidden="true">→</span></button>
+      <button class="choice" data-challenge="turnstile"><strong>Cloudflare Turnstile</strong><span>Checkbox verification</span><span aria-hidden="true">→</span></button>
+    </div>
+    <label class="challenge-option" for="challenge-number">Challenge<select id="challenge-number"><option value="random">Random</option>{(['image', 'slider'] as const).map((kind) => <optgroup label={kind === 'image' ? 'Image grid' : 'Slider'}>{trainingCatalog.filter((entry) => entry.kind === kind).map((entry) => <option value={`${entry.kind}:${entry.index}`}>{entry.id}</option>)}</optgroup>)}</select></label>
+    <label class="fullscreen-option"><input type="checkbox" id="fullscreen" checked /> Open fullscreen</label>
+    <label class="fullscreen-option"><input type="checkbox" id="high-contrast" /> High contrast</label>
+    <label class="fullscreen-option"><input type="checkbox" id="training-overlay-toggle" /> Training overlay</label>
+    <label class="fullscreen-option"><input type="checkbox" id="screen-markers-toggle" /> Camera markers</label>
+    <p id="screen-markers-status" class="muted" role="status" hidden></p>
+    <p class="overlay-hint muted">Screen coordinates and distances in pixels.</p>
+    <details class="training-settings">
+      <summary>Training settings</summary>
+      <label for="practice-mode">Practice<select id="practice-mode"><option value="full">Full flow</option><option value="tile">One tile click</option><option value="slider">Slider only</option><option value="checkbox">Checkbox only</option></select></label>
+      <label id="practice-tile-option" for="practice-tile" hidden>Tile<select id="practice-tile">{Array.from({ length: 9 }, (_, index) => <option value={index}>{index + 1}</option>)}</select></label>
+      <label for="training-overlay-detail">Show<select id="training-overlay-detail"><option value="all">All</option><option value="markers">Markers</option><option value="coordinates">Coordinates</option><option value="distances">Distances</option></select></label>
+      <label for="training-overlay-focus">Target<select id="training-overlay-focus"><option value="all">All targets</option><option value="checkbox">Checkbox</option>{Array.from({ length: 9 }, (_, index) => <option value={`tile-${index + 1}`}>Tile {index + 1}</option>)}<option value="verify">Verify</option><option value="slider">Slider</option></select></label>
+    </details>
+    <p id="fullscreen-status" class="muted" role="status"></p>
+    </section>
+    <aside class="session-panel" aria-labelledby="session-title">
+      <h2 id="session-title">Training session</h2>
+      <p class="muted">A shuffled sequence without repeats.</p>
+      <label for="training-ratio">Training %<input id="training-ratio" type="number" min="10" max="90" step="1" value="80" /></label>
+      <p class="muted">Custom ratios split tasks; photos may overlap.</p>
+      <label for="session-split">Split<select id="session-split"><option value="train">Train · {trainingCatalog.filter((entry) => entry.split === 'train').length}</option><option value="test">Test · {trainingCatalog.filter((entry) => entry.split === 'test').length}</option></select></label>
+      <label for="session-kind">Tasks<select id="session-kind"><option value="image">Image (default)</option><option value="slider">Slider (bonus)</option><option value="mixed">Mixed (optional)</option></select></label>
+      <label for="session-count">Count<input id="session-count" type="number" min="1" value="100" /></label>
+      <p id="session-availability" class="muted" role="status"></p>
+      <button id="start-session" class="button primary" type="button">Start session</button>
+    </aside>
+  </main>}
+  <dialog id="challenge-dialog" data-phase="checkbox" aria-label="Human verification">
+    <button id="close-challenge" type="button" aria-label="Close challenge"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.5" /></svg></button>
+    <div id="checkbox-step">
+      <button id="human-checkbox" type="button">
+        <span class="checkbox-box" aria-hidden="true"><svg class="checkbox-check" viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="12" fill="#038127" /><path d="m6 12 4 4 8-8" fill="none" stroke="white" stroke-width="2" /></svg></span>
+        <span id="checkbox-label">I'm not a robot</span>
+        <span class="widget-brand recaptcha-brand"><img src="/brands/recaptcha.avif" width="32" height="32" alt="" /><span>reCAPTCHA</span><small>Privacy - Terms</small></span>
+        <span class="widget-brand turnstile-brand"><img src="/brands/cloudflare.svg" width="76" height="29" alt="Cloudflare" /><small>Privacy · Terms</small></span>
+      </button>
+    </div>
+    <ImageChallenge />
+    <SliderChallenge />
+    <TrainingOverlay />
+    <div id="browser-feedback" hidden><p id="browser-status" role="alert"></p><button id="retry-completion" type="button" hidden>Retry saving completion</button></div>
+    <div id="session-progress" hidden><span id="session-progress-label" role="status"></span><button id="stop-session" type="button">Stop session</button></div>
+  </dialog>
+  <script>
+    import { readStorage, writeStorage, removeStorage, requestFullscreen, exitFullscreen, openDialog, prepareImages, navigate } from '../lib/browser-state';
+    import type { StorageKind } from '../lib/browser-state';
+    import { trainingCatalog, partitionTrainingCatalog } from '../data/training-catalog';
+    type CatalogEntry = (typeof trainingCatalog)[number];
+    type ChallengeKind = CatalogEntry['kind'] | 'turnstile';
+    const dialog = document.querySelector<HTMLDialogElement>('#challenge-dialog');
+    const demo = document.querySelector<HTMLElement>('#minesweeper-demo');
+    const checkbox = document.querySelector<HTMLButtonElement>('#human-checkbox');
+    const checkboxStep = document.querySelector<HTMLElement>('#checkbox-step');
+    const image = document.querySelector<HTMLElement>('#image-challenge');
+    const slider = document.querySelector<HTMLElement>('#slider-challenge');
+    const close = document.querySelector<HTMLButtonElement>('#close-challenge');
+    const fullscreen = document.querySelector<HTMLInputElement>('#fullscreen');
+    const fullscreenStatus = document.querySelector<HTMLElement>('#fullscreen-status');
+    const challengeNumber = document.querySelector<HTMLSelectElement>('#challenge-number');
+    const practiceMode = document.querySelector<HTMLSelectElement>('#practice-mode');
+    const practiceTile = document.querySelector<HTMLSelectElement>('#practice-tile');
+    const practiceTileOption = document.querySelector<HTMLElement>('#practice-tile-option');
+    const sessionSplit = document.querySelector<HTMLSelectElement>('#session-split');
+    const sessionKind = document.querySelector<HTMLSelectElement>('#session-kind');
+    const sessionCount = document.querySelector<HTMLInputElement>('#session-count');
+    const trainingRatio = document.querySelector<HTMLInputElement>('#training-ratio');
+    const sessionAvailability = document.querySelector<HTMLElement>('#session-availability');
+    const startSession = document.querySelector<HTMLButtonElement>('#start-session');
+    const sessionProgress = document.querySelector<HTMLElement>('#session-progress');
+    const sessionProgressLabel = document.querySelector<HTMLElement>('#session-progress-label');
+    let kind: ChallengeKind = 'image';
+    let challengeIndex = 0;
+    let complete = false;
+    let pending = false;
+    let queue: CatalogEntry[] = [];
+    let queuePosition = 0;
+    let generation = 0;
+    let advanceTimer: number | undefined;
+    let sessionCatalog: readonly CatalogEntry[] = trainingCatalog;
+    const feedback = document.querySelector<HTMLElement>('#browser-feedback');
+    const browserStatus = document.querySelector<HTMLElement>('#browser-status');
+    const retryCompletion = document.querySelector<HTMLButtonElement>('#retry-completion');
+    function report(message: string) {
+      if (fullscreenStatus) fullscreenStatus.textContent = message;
+      if (browserStatus) browserStatus.textContent = message;
+      if (feedback) feedback.hidden = false;
+    }
+    function readPreference(storage: StorageKind, key: string): string | null {
+      if (demo) return null;
+      return readStorage(storage, key).match((value) => value, () => {
+        report('Browser storage is blocked. Settings work for this page; enable site storage to save completion.');
+        return null;
+      });
+    }
+    function savePreference(storage: StorageKind, key: string, value: string): void {
+      if (demo) return;
+      writeStorage(storage, key, value).match(() => {}, () => report('Settings could not be saved. Enable site storage to keep settings and save completion.'));
+    }
+    function removePreference(key: string): void {
+      if (demo) return;
+      removeStorage('session', key).match(() => {}, () => report('Browser storage is blocked. Enable site storage before completing a task.'));
+    }
+
+    if (trainingRatio) trainingRatio.value = readPreference('session', 'captcha-training-ratio') ?? '80';
+
+    function availableEntries(): CatalogEntry[] {
+      const mode = practiceMode?.value ?? 'full';
+      if (mode === 'checkbox') return [];
+      const filter = mode === 'tile' ? 'image' : mode === 'slider' ? 'slider' : sessionKind?.value ?? 'image';
+      return sessionCatalog.filter((entry) => entry.split === (sessionSplit?.value ?? 'train') && (filter === 'mixed' || entry.kind === filter));
+    }
+
+    function updateSessionSettings() {
+      const enteredRatio = Number(trainingRatio?.value ?? '80');
+      const ratio = Math.min(90, Math.max(10, Number.isFinite(enteredRatio) ? Math.round(enteredRatio) : 80));
+      if (trainingRatio) trainingRatio.value = String(ratio);
+      savePreference('session', 'captcha-training-ratio', String(ratio));
+      sessionCatalog = partitionTrainingCatalog(ratio);
+      if (sessionSplit) {
+        for (const option of sessionSplit.options) {
+          const split = option.value;
+          option.textContent = `${split === 'train' ? 'Train' : 'Test'} · ${sessionCatalog.filter((entry) => entry.split === split).length}`;
+        }
+      }
+      const entries = availableEntries();
+      if (sessionKind) {
+        const mode = practiceMode?.value ?? 'full';
+        sessionKind.disabled = mode !== 'full';
+        if (mode === 'tile') sessionKind.value = 'image';
+        if (mode === 'slider') sessionKind.value = 'slider';
+      }
+      if (sessionCount) {
+        sessionCount.max = String(entries.length);
+        sessionCount.disabled = entries.length === 0;
+        const count = Number(sessionCount.value);
+        sessionCount.value = String(Math.min(Math.max(Number.isFinite(count) ? Math.floor(count) : 100, 1), Math.max(entries.length, 1)));
+      }
+      if (startSession) startSession.disabled = entries.length === 0;
+      if (sessionAvailability) sessionAvailability.textContent = entries.length === 0 ? 'Checkbox practice is outside the training catalog.' : `${entries.length} challenges available.`;
+    }
+
+    function updatePractice() {
+      const mode = practiceMode?.value ?? 'full';
+      savePreference('session', 'captcha-practice-mode', mode);
+      savePreference('session', 'captcha-practice-tile', practiceTile?.value ?? '0');
+      if (practiceTileOption) practiceTileOption.hidden = mode !== 'tile';
+      const compatible = mode === 'tile' ? 'image' : mode === 'slider' ? 'slider' : 'turnstile';
+      document.querySelectorAll<HTMLButtonElement>('[data-challenge]').forEach((button) => {
+        button.disabled = mode !== 'full' && button.dataset.challenge !== compatible;
+      });
+      updateSessionSettings();
+    }
+    if (practiceMode) {
+      const savedMode = readPreference('session', 'captcha-practice-mode') ?? 'full';
+      if (['full', 'tile', 'slider', 'checkbox'].includes(savedMode)) practiceMode.value = savedMode;
+      practiceMode.addEventListener('change', updatePractice);
+    }
+    if (practiceTile) {
+      const savedTile = Number(readPreference('session', 'captcha-practice-tile') ?? '0');
+      if (Number.isInteger(savedTile) && savedTile >= 0 && savedTile < 9) practiceTile.value = String(savedTile);
+      practiceTile.addEventListener('change', updatePractice);
+    }
+    updatePractice();
+    sessionSplit?.addEventListener('change', updateSessionSettings);
+    sessionKind?.addEventListener('change', updateSessionSettings);
+    sessionCount?.addEventListener('change', updateSessionSettings);
+    trainingRatio?.addEventListener('change', updateSessionSettings);
+    const contrast = document.querySelector<HTMLInputElement>('#high-contrast');
+    if (contrast) {
+      contrast.checked = readPreference('local', 'captcha-contrast') === 'high';
+      contrast.addEventListener('change', () => {
+        const mode = contrast.checked ? 'high' : 'normal';
+        document.documentElement.dataset.contrast = mode;
+        savePreference('local', 'captcha-contrast', mode);
+      });
+    }
+    if (challengeNumber) {
+      const savedSelection = readPreference('session', 'captcha-challenge-selection') ?? 'random';
+      if (savedSelection === 'random' || trainingCatalog.some((entry) => `${entry.kind}:${entry.index}` === savedSelection)) challengeNumber.value = savedSelection;
+    }
+
+    function cancelSession() {
+      removePreference('captcha-session-total');
+      generation += 1;
+      if (advanceTimer !== undefined) window.clearTimeout(advanceTimer);
+      advanceTimer = undefined;
+      queue = [];
+      queuePosition = 0;
+      pending = false;
+      if (retryCompletion) retryCompletion.hidden = true;
+      if (sessionProgress) sessionProgress.hidden = true;
+    }
+
+    function showChallenge() {
+      if (!dialog || !checkboxStep) return;
+      dialog.dataset.phase = 'challenge';
+      checkboxStep.hidden = true;
+      const challenge = kind === 'slider' ? slider : image;
+      if (!challenge) return;
+      challenge.hidden = false;
+      const focusTarget = dialog.dataset.practice === 'tile' ? '.image-tile:not(:disabled)' : 'input:not(:disabled), button:not(:disabled)';
+      challenge.querySelector<HTMLElement>(focusTarget)?.focus();
+    }
+
+    async function launchChallenge(nextKind: ChallengeKind, index: number) {
+      if (!dialog || !checkbox || !checkboxStep || !image || !close) return;
+      const currentGeneration = ++generation;
+      if (feedback) feedback.hidden = true;
+      if (fullscreenStatus) fullscreenStatus.textContent = '';
+      kind = nextKind;
+      challengeIndex = index;
+      pending = true;
+      if (retryCompletion) retryCompletion.hidden = true;
+      checkbox.disabled = true;
+      close.disabled = false;
+      checkbox.removeAttribute('data-success');
+      dialog.dataset.kind = kind;
+      const practice = practiceMode?.value ?? 'full';
+      savePreference('session', 'captcha-practice-mode', practice);
+      savePreference('session', 'captcha-practice-tile', practiceTile?.value ?? '0');
+      savePreference('session', 'captcha-challenge-index', String(challengeIndex));
+      const entry = queue.length > 0 ? queue[queuePosition] : trainingCatalog.find((item) => item.kind === kind && item.index === index);
+      if (entry) {
+        savePreference('session', 'captcha-challenge-id', entry.id);
+        savePreference('session', 'captcha-challenge-split', entry.split);
+      } else {
+        removePreference('captcha-challenge-id');
+        removePreference('captcha-challenge-split');
+      }
+      dialog.dataset.practice = practice;
+      dialog.dataset.practiceTile = practiceTile?.value ?? '0';
+      dialog.dataset.phase = 'checkbox';
+      const checkboxLabel = document.querySelector('#checkbox-label');
+      if (checkboxLabel) checkboxLabel.textContent = kind === 'image' ? "I'm not a robot" : 'Verify you are human';
+      document.dispatchEvent(new CustomEvent('challenge-select', { detail: { kind, index: challengeIndex } }));
+      document.dispatchEvent(new Event('challenge-reset'));
+      checkboxStep.hidden = false;
+      image.hidden = true;
+      if (slider) slider.hidden = true;
+      if (sessionProgress) sessionProgress.hidden = queue.length === 0;
+      if (sessionProgressLabel && queue.length > 0 && entry) sessionProgressLabel.textContent = `${queuePosition + 1}/${queue.length} · ${entry.split === 'train' ? 'Train' : 'Test'} · ${entry.id}`;
+      if (kind !== 'turnstile') {
+        if (checkboxLabel) checkboxLabel.textContent = 'Loading images…';
+        if (fullscreenStatus) fullscreenStatus.textContent = 'Loading challenge images…';
+        const section = kind === 'image' ? image : slider;
+        const images = Array.from(section?.querySelectorAll<HTMLImageElement>('img') ?? []);
+        const loaded = await prepareImages(images);
+        if (currentGeneration !== generation) return;
+        if (loaded.isErr()) {
+          report('Challenge images could not load. Check the connection, close this challenge, and try again.');
+          cancelSession();
+          return;
+        }
+        if (fullscreenStatus) fullscreenStatus.textContent = '';
+        if (checkboxLabel) checkboxLabel.textContent = kind === 'image' ? "I'm not a robot" : 'Verify you are human';
+      }
+      if (fullscreen?.checked && !document.fullscreenElement) {
+        const result = await requestFullscreen();
+        if (result.isErr()) report('Fullscreen is unavailable. The challenge still works in this window.');
+      }
+      if (currentGeneration !== generation) return;
+      pending = false;
+      checkbox.disabled = false;
+      if (!dialog.open) {
+        const opened = openDialog(dialog);
+        if (opened.isErr()) { report('The challenge could not open. Close other dialogs and try again.'); cancelSession(); return; }
+      }
+      if (practice === 'tile' || practice === 'slider') showChallenge();
+      else checkbox.focus();
+    }
+
+    function saveCompletion() {
+      if (demo) {
+        complete = true;
+        demo.dataset.verified = 'true';
+        const status = demo.querySelector<HTMLElement>('[role="status"]');
+        if (status) status.textContent = 'Verification complete. Enjoy Minesweeper!';
+        dialog?.close();
+        demo.querySelector<HTMLButtonElement>('#demo-restart')?.focus();
+        return;
+      }
+      const total = queue.length;
+      const entry = total > 0 ? queue[queuePosition]
+        : trainingCatalog.find((item) => item.kind === kind && item.index === challengeIndex);
+      const saved = writeStorage('session', 'captcha-challenge-index', String(challengeIndex))
+        .andThen(() => entry ? writeStorage('session', 'captcha-challenge-id', entry.id)
+          : removeStorage('session', 'captcha-challenge-id'))
+        .andThen(() => entry ? writeStorage('session', 'captcha-challenge-split', entry.split)
+          : removeStorage('session', 'captcha-challenge-split'))
+        .andThen(() => writeStorage('session', 'captcha-practice-mode', practiceMode?.value ?? 'full'))
+        .andThen(() => writeStorage('session', 'captcha-practice-tile', practiceTile?.value ?? '0'))
+        .andThen(() => total > 0
+          ? writeStorage('session', 'captcha-session-total', String(total))
+          : removeStorage('session', 'captcha-session-total'))
+        .andThen(() => writeStorage('session', 'captcha-solved', kind));
+      if (saved.isErr()) {
+        pending = true;
+        if (close) close.disabled = false;
+        report('Task complete, but the browser could not save it. Enable storage for this site, then retry saving completion.');
+        if (retryCompletion) retryCompletion.hidden = false;
+        return;
+      }
+      const navigation = navigate('/verified/');
+      if (navigation.isErr()) {
+        report('Completion saved, but the result page could not open. Use Retry saving completion.');
+        if (retryCompletion) retryCompletion.hidden = false;
+        return;
+      }
+      complete = true;
+    }
+    retryCompletion?.addEventListener('click', saveCompletion);
+
+    function finish() {
+      if (complete || pending || !dialog?.open) return;
+      if (queue.length > 0) {
+        pending = true;
+        const currentGeneration = generation;
+        advanceTimer = window.setTimeout(() => {
+          if (currentGeneration !== generation) return;
+          const next = queue[queuePosition + 1];
+          if (next) {
+            queuePosition += 1;
+            void launchChallenge(next.kind, next.index);
+            return;
+          }
+          saveCompletion();
+        }, 300);
+        return;
+      }
+      saveCompletion();
+    }
+
+    function checkCompleted() {
+      if (demo) return;
+      if (readPreference('session', 'captcha-solved')) navigate('/verified/', true).match(() => {}, () => report('Could not open the saved result. Reload this page to retry.'));
+    }
+    checkCompleted();
+    window.addEventListener('pageshow', checkCompleted);
+
+    document.querySelectorAll<HTMLButtonElement>('[data-challenge]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const nextKind = button.dataset.challenge;
+        if (nextKind !== 'image' && nextKind !== 'slider' && nextKind !== 'turnstile') return;
+        cancelSession();
+        removePreference('captcha-session-total');
+        const selection = challengeNumber?.value ?? 'random';
+        savePreference('session', 'captcha-challenge-selection', selection);
+        const entries = trainingCatalog.filter((entry) => entry.kind === nextKind);
+        const selected = entries.find((entry) => `${entry.kind}:${entry.index}` === selection);
+        const entry = selected ?? entries[Math.floor(Math.random() * entries.length)];
+        void launchChallenge(nextKind, entry?.index ?? 0);
+      });
+    });
+
+    startSession?.addEventListener('click', () => {
+      updateSessionSettings();
+      const entries = availableEntries();
+      if (entries.length === 0) return;
+      cancelSession();
+      removePreference('captcha-session-total');
+      // Fisher–Yates keeps every catalog entry equally likely without repeats.
+      for (let index = entries.length - 1; index > 0; index -= 1) {
+        const swapIndex = Math.floor(Math.random() * (index + 1));
+        const current = entries[index];
+        const other = entries[swapIndex];
+        if (current && other) {
+          entries[index] = other;
+          entries[swapIndex] = current;
+        }
+      }
+      queue = entries.slice(0, Number(sessionCount?.value ?? '100'));
+      queuePosition = 0;
+      const first = queue[0];
+      if (first) void launchChallenge(first.kind, first.index);
+    });
+
+    checkbox?.addEventListener('click', () => {
+      if (pending) return;
+      if (kind === 'turnstile' && checkbox && close) {
+        checkbox.disabled = true;
+        close.disabled = true;
+        checkbox.dataset.success = 'true';
+        const label = document.querySelector('#checkbox-label');
+        if (label) label.textContent = 'Success!';
+        advanceTimer = window.setTimeout(finish, 500);
+        return;
+      }
+      showChallenge();
+    });
+    close?.addEventListener('click', () => dialog?.close());
+    document.querySelector('#stop-session')?.addEventListener('click', () => {
+      cancelSession();
+      dialog?.close();
+    });
+    dialog?.addEventListener('cancel', (event) => {
+      if (close?.disabled) event.preventDefault();
+      else cancelSession();
+    });
+    dialog?.addEventListener('close', () => {
+      cancelSession();
+      if (document.fullscreenElement) {
+        void exitFullscreen().match(() => {}, () => report('Could not leave fullscreen. Press Escape or use the browser fullscreen control.'));
+      }
+    });
+    document.addEventListener('challenge-state', (event) => {
+      if (!(event instanceof CustomEvent)) return;
+      const detail: unknown = event.detail;
+      if (typeof detail !== 'object' || detail === null || !('state' in detail) || !('kind' in detail)) return;
+      if (detail.state === 'success' && detail.kind === kind) finish();
+    });
+    if (demo) {
+      function startDemo() {
+        if (pending || dialog?.open) return;
+        complete = false;
+        if (demo) {
+          demo.dataset.verified = 'false';
+          const status = demo.querySelector<HTMLElement>('[role="status"]');
+          if (status) status.textContent = 'One quick human check before you play.';
+        }
+        void launchChallenge('image', 0);
+      }
+      demo.querySelector('#demo-restart')?.addEventListener('click', startDemo);
+      demo.querySelectorAll('.mine-cell').forEach((cell) => {
+        cell.addEventListener('click', () => { if (!complete) startDemo(); });
+      });
+      startDemo();
+    }
+  </script>
+  <style>
+    .site-header { display: flex; justify-content: space-between; gap: 20px; padding: 24px 36px; border-bottom: 1px solid var(--line); font-size: .85rem; }
+    .site-header a { text-decoration: none; font-weight: 600; }
+    .selection { display: grid; grid-template-columns: minmax(0, 592px) 280px; gap: 64px; max-width: 984px; margin: 8vh auto; padding: 0 24px; align-items: start; }
+    .session-panel { border-left: 1px solid var(--line); padding-left: 24px; }
+    .session-panel h2 { margin: 0; font-size: 1.2rem; }
+    .session-panel p { font-size: .8rem; }
+    .session-panel label { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; font-size: .85rem; }
+    .session-panel select, .session-panel input { width: 140px; min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 3px; font: inherit; background: #fff; color: var(--text); }
+    .session-panel .button { width: 100%; margin-top: 8px; }
+    .session-panel .button:disabled { opacity: .45; cursor: default; }
+    #browser-feedback { position: fixed; top: 24px; left: 24px; right: 24px; max-width: 560px; margin: auto; padding: 12px; background: #fff; color: #8b1e1e; border: 1px solid #8b1e1e; font-size: 13px; }
+    #browser-status { margin: 0; }
+    #retry-completion { margin-top: 8px; padding: 6px 10px; background: #fff; color: #111; border: 1px solid #aaa; border-radius: 3px; font: inherit; }
+    #session-progress { position: fixed; left: 24px; right: 24px; bottom: 20px; display: flex; justify-content: space-between; align-items: center; gap: 16px; pointer-events: none; font-size: 13px; color: #111; }
+    #session-progress-label { padding: 8px 12px; background: #fff; border: 1px solid #ccc; border-radius: 3px; }
+    #stop-session { pointer-events: auto; padding: 8px 12px; background: #fff; color: #111; border: 1px solid #aaa; border-radius: 3px; font: inherit; }
+    h1 { font-size: 2rem; margin: 0 0 12px; }
+    .choices { display: grid; gap: 12px; margin: 32px 0 24px; }
+    .choice { display: grid; grid-template-columns: 1fr auto; gap: 8px 24px; text-align: left; padding: 22px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: var(--text); }
+    .choice:hover { border-color: var(--text); }
+    .choice:disabled { opacity: .45; cursor: default; }
+    .choice strong { font-weight: 550; }
+    .choice span:first-of-type { grid-row: 2; font-size: .85rem; color: var(--muted); }
+    .choice span:last-child { grid-row: 1 / 3; grid-column: 2; align-self: center; }
+    .challenge-option { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; font-size: .85rem; }
+    .challenge-option select { min-width: 76px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 3px; background: #fff; color: var(--text); }
+    .fullscreen-option { display: flex; gap: 10px; align-items: center; font-size: .85rem; }
+    .fullscreen-option + .fullscreen-option { margin-top: 12px; }
+    .fullscreen-option input { width: 19px; height: 19px; accent-color: var(--accent); }
+    .overlay-hint { margin: 6px 0 0 29px; font-size: .75rem; }
+    .training-settings { margin: 12px 0 0 29px; font-size: .8rem; }
+    .training-settings summary { cursor: pointer; }
+    .training-settings label { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 260px; margin-top: 12px; }
+    .training-settings select { min-width: 130px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 3px; background: #fff; color: var(--text); }
+    .demo-note { margin-top: 40px; font-size: .8rem; }
+    #fullscreen-status { font-size: .8rem; }
+    dialog { width: min(400px, calc(100% - 32px)); max-height: calc(100dvh - 64px); padding: 0; border: 1px solid #ccc; border-radius: 3px; background: #fff; color: #111; font-family: Arial, sans-serif; overflow: visible; }
+    dialog[data-phase='checkbox'] { width: 304px; border: 0; background: transparent; }
+    dialog[data-phase='checkbox'][data-kind='turnstile'] { width: 300px; }
+    dialog[data-phase='challenge'][data-kind='slider'] { width: min(380px, calc(100% - 32px)); }
+    dialog[data-phase='challenge'] :global(#image-challenge), dialog[data-phase='challenge'] :global(#slider-challenge) { max-height: calc(100dvh - 96px); overflow-y: auto; }
+    .selection :is(input, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    dialog::backdrop { background: #ffffffb3; backdrop-filter: blur(7px); }
+    #close-challenge { display: grid; place-items: center; position: absolute; right: -5px; top: -36px; width: 28px; height: 28px; padding: 0; color: #555; background: transparent; border: 0; border-radius: 3px; }
+    #close-challenge:hover { color: #000; background: #eee; }
+    #checkbox-step { padding: 0; }
+    #human-checkbox { display: flex; align-items: center; gap: 12px; width: 304px; height: 78px; padding: 0 11px 0 12px; border: 1px solid #d3d3d3; border-radius: 3px; background: #fafafa; color: #000; text-align: left; font-family: Arial, sans-serif; font-size: 14px; font-weight: 400; box-shadow: 0 1px 4px #00000014; }
+    #checkbox-label { white-space: nowrap; line-height: 17px; }
+    .checkbox-box { flex-shrink: 0; width: 28px; height: 28px; border: 2px solid #444746; border-radius: 2px; background: #fff; }
+    #human-checkbox:hover .checkbox-box { border-color: #888; }
+    .widget-brand { display: flex; flex-direction: column; align-items: center; margin-left: auto; font-size: 10px; line-height: 12px; color: #555; white-space: nowrap; }
+    .recaptcha-brand { align-self: stretch; justify-content: center; padding-top: 3px; width: 60px; }
+    .recaptcha-brand img { margin-bottom: 3px; }
+    .widget-brand small { display: block; font-size: 8px; line-height: 10px; margin-top: 2px; }
+    .turnstile-brand { display: none; }
+    [data-kind='slider'] .recaptcha-brand { display: none; }
+    .checkbox-check { display: none; }
+    #human-checkbox[data-success='true'] .checkbox-box { border: 0; background: transparent; }
+    #human-checkbox[data-success='true'] .checkbox-check { display: block; }
+    #human-checkbox:disabled { cursor: default; }
+    [data-kind='turnstile'] #human-checkbox { width: 300px; height: 65px; gap: 8px; padding: 0 12px; border-color: #e0e0e0; border-radius: 0; box-shadow: none; }
+    [data-kind='turnstile'] .checkbox-box { width: 24px; height: 24px; border: 2px solid #6d6d6d; border-radius: 0; }
+    [data-kind='turnstile'] .recaptcha-brand { display: none; }
+    [data-kind='turnstile'] .turnstile-brand { display: flex; }
+    [data-kind='turnstile'] .turnstile-brand small { font-size: 9px; }
+    :global([data-contrast='high']) #human-checkbox { border-color: #000; background: #fff; }
+    :global([data-contrast='high']) .checkbox-box { border-color: #000; }
+    :global([data-contrast='high']) .widget-brand { color: #000; }
+    @media (max-width: 800px) { .selection { grid-template-columns: minmax(0, 1fr); max-width: 640px; gap: 40px; } .session-panel { border-left: 0; border-top: 1px solid var(--line); padding: 24px 0 0; } #session-progress { left: 12px; right: 12px; bottom: 12px; font-size: 11px; } }
+    @media (max-width: 480px) { .selection { margin-top: 8vh; } }
+  </style>
+</Page>
