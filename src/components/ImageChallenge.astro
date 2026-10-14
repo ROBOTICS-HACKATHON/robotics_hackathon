@@ -4,7 +4,10 @@ import { imageChallenge } from '../data/challenges';
 
 <section id="image-challenge" class="image-challenge" aria-labelledby="image-heading" hidden>
   <header class="challenge-heading">
-    <h2 id="image-heading">{imageChallenge.prompt}</h2>
+    <h2 id="image-heading">
+      <span>{imageChallenge.instruction}</span>
+      <strong>{imageChallenge.subject}</strong>
+    </h2>
   </header>
   <div class="image-grid" role="group" aria-labelledby="image-heading">
     {imageChallenge.tiles.map((tile, index) => (
@@ -19,10 +22,13 @@ import { imageChallenge } from '../data/challenges';
     <span class="selection-count" aria-hidden="true">0 / 9</span>
   </div>
   <footer class="challenge-actions">
-    <button type="button" class="reset-button">Reset</button>
+    <button type="button" class="reset-button" aria-label="Reset challenge" title="Reset challenge">
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+        <path fill="currentColor" d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.93 9h-2.02A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z" />
+      </svg>
+    </button>
     <button type="button" class="verify-button">Verify</button>
   </footer>
-  <div class="captcha-brand">reCAPTCHA · Demo</div>
 </section>
 
 <script>
@@ -95,43 +101,36 @@ import { imageChallenge } from '../data/challenges';
 <style>
   .image-challenge {
     width: 100%;
+    padding-top: 7px;
+    color: #222;
+    background: #fff;
+    font-family: Arial, Helvetica, sans-serif;
   }
 
   .challenge-heading {
+    margin: 0 7px;
     padding: 24px;
-    background: var(--accent, #1a73e8);
-    color: white;
-  }
-
-  .challenge-label {
-    color: var(--accent, #2563eb);
-    font: inherit;
-    font-size: 0.8125rem;
+    min-height: 113px;
+    background: #1a73e8;
+    color: #fff;
   }
 
   h2 {
-    font-size: clamp(1.35rem, 3vw, 1.7rem);
-    font-weight: 550;
-    letter-spacing: -0.035em;
     margin: 0;
-    color: white;
-    font-weight: 600;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.3;
     letter-spacing: normal;
   }
 
-  .challenge-heading p {
-    margin: 0;
-    color: #666;
-    font-size: 0.875rem;
-    line-height: 1.5;
-  }
+  h2 span, h2 strong { display: block; }
+  h2 strong { font-size: 28px; font-weight: 900; }
 
   .image-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 3px;
-    width: min(calc(100% - 16px), max(240px, calc(100dvh - 380px)));
-    margin: 8px auto 0;
+    gap: 2px;
+    margin: 7px;
   }
 
   .image-tile {
@@ -141,7 +140,7 @@ import { imageChallenge } from '../data/challenges';
     min-width: 0;
     padding: 0;
     overflow: hidden;
-    border: 2px solid transparent;
+    border: 0;
     border-radius: 0;
     background: #fff;
     cursor: pointer;
@@ -154,124 +153,90 @@ import { imageChallenge } from '../data/challenges';
     object-fit: cover;
   }
 
-  .image-tile:hover {
-    border-color: #666;
-  }
+  .image-tile[aria-pressed='true'] img { transform: scale(0.8); }
 
-  .image-tile[aria-pressed='true'] {
-    border-color: var(--accent, #2563eb);
-  }
-
-  .image-tile:focus-visible,
-  .challenge-actions button:focus-visible {
-    outline: 2px solid var(--accent, #2563eb);
-    outline-offset: 3px;
+  .image-tile:focus-visible, .challenge-actions button:focus-visible {
+    outline: 2px solid #185abc;
+    outline-offset: -2px;
   }
 
   .selection-mark {
     display: none;
     position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 28px;
-    height: 28px;
+    top: 0;
+    left: 0;
+    width: 30px;
+    height: 30px;
     border-radius: 50%;
-    background: var(--accent, #2563eb);
+    background: #1a73e8;
     color: #fff;
-    font: bold 18px/28px sans-serif;
+    font: bold 20px/30px Arial, sans-serif;
     text-align: center;
   }
 
-  .image-tile[aria-pressed='true'] .selection-mark {
-    display: block;
-  }
+  .image-tile[aria-pressed='true'] .selection-mark { display: block; }
 
-  .challenge-feedback {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    min-height: 62px;
-    padding: 10px 16px;
-    color: #666;
-  }
-
-  .image-status {
-    margin: 0;
-    font-size: 0.8125rem;
-    line-height: 1.5;
-  }
-
-  .selection-count {
-    flex-shrink: 0;
-    font-size: 0.75rem;
+  .challenge-feedback { margin: 0; }
+  .image-status, .selection-count {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   [data-state='error'] .image-status {
-    color: #b42318;
-  }
-
-  [data-state='success'] .image-status {
-    color: #16703a;
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 8px 7px;
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+    color: #c5221f;
+    font-size: 14px;
+    text-align: center;
   }
 
   .challenge-actions {
     display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 12px 16px;
-    border-top: 1px solid #ddd;
-  }
-
-  .challenge-actions button {
-    min-height: 48px;
-    padding: 12px 18px;
-    border: 1px solid #ddd;
-    border-radius: 2px;
-    font: inherit;
-    font-size: 0.875rem;
-    cursor: pointer;
-  }
-
-  .reset-button {
-    color: #111;
-    background: transparent;
-  }
-
-  .reset-button:hover {
-    border-color: #666;
-  }
-
-  .verify-button {
-    display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 24px;
+    min-height: 60px;
+    padding: 7px;
+    border-top: 1px solid #dfdfdf;
+  }
+
+  .challenge-actions button { font-family: inherit; cursor: pointer; }
+  .reset-button {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 42px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #757575;
+  }
+
+  .reset-button:hover { color: #444; }
+  .verify-button {
+    min-width: 100px;
+    height: 42px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 2px;
     color: #fff;
-    background: var(--accent, #2563eb);
+    background: #1a73e8;
+    font-size: 14px;
+    font-weight: 500;
     text-transform: uppercase;
-    font-weight: 600;
   }
 
-  .verify-button:hover {
-    filter: brightness(1.08);
-  }
-
-  .image-tile:disabled {
-    cursor: default;
-  }
-
-  .verify-button:disabled {
-    cursor: default;
-    opacity: 0.65;
-  }
-
-  .captcha-brand { padding: 0 16px 12px; color: #777; text-align: right; font-size: .6rem; }
-
-  @media (max-width: 420px) {
-    .image-grid { gap: 4px; }
-    .selection-mark { top: 5px; right: 5px; width: 24px; height: 24px; line-height: 24px; }
-    .challenge-actions button { padding: 12px; }
-    .verify-button { gap: 12px; }
-  }
+  .verify-button:hover { background: #185abc; }
+  .image-tile:disabled { cursor: default; }
+  .verify-button:disabled { cursor: default; background: #8ab4f8; }
 </style>

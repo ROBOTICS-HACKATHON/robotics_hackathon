@@ -1,5 +1,7 @@
 export const imageChallenge = {
   prompt: 'Select all images with cats.',
+  instruction: 'Select all images with',
+  subject: 'cats',
   tiles: [
     { src: '/images/cat-1.jpg', alt: 'A gray cat', correct: true },
     { src: '/images/dog-1.jpg', alt: 'A shiba puppy', correct: false },

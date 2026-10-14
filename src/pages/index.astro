@@ -3,25 +3,26 @@ import Page from '../layouts/Page.astro';
 import ImageChallenge from '../components/ImageChallenge.astro';
 import SliderChallenge from '../components/SliderChallenge.astro';
 ---
-<Page title="Not a robot · CAPTCHA demo">
+<Page title="Human verification">
   <main class="selection">
     <h1>Access website</h1>
-    <p class="muted">Choose a challenge to verify that you're human.</p>
+    <p class="muted">Local robot demo. Choose a verification challenge.</p>
     <div class="choices">
       <button class="choice" data-challenge="image"><strong>reCAPTCHA</strong><span>Image grid</span><span aria-hidden="true">→</span></button>
-      <button class="choice" data-challenge="slider"><strong>Slider verification</strong><span>Slide the piece into the gap.</span><span aria-hidden="true">→</span></button>
+      <button class="choice" data-challenge="slider"><strong>Cloudflare Turnstile</strong><span>Slide the piece into the gap.</span><span aria-hidden="true">→</span></button>
     </div>
     <label class="fullscreen-option"><input type="checkbox" id="fullscreen" checked /> Open fullscreen</label>
     <label class="fullscreen-option"><input type="checkbox" id="high-contrast" /> High contrast</label>
     <p id="fullscreen-status" class="muted" role="status"></p>
   </main>
-  <dialog id="challenge-dialog" aria-label="Human verification">
-    <div class="challenge-top"><span class="muted">Demo</span><button id="close-challenge" type="button" aria-label="Close challenge">✕</button></div>
+  <dialog id="challenge-dialog" data-phase="checkbox" aria-label="Human verification">
+    <button id="close-challenge" type="button" aria-label="Close challenge"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.5" /></svg></button>
     <div id="checkbox-step">
       <button id="human-checkbox" type="button">
         <span class="checkbox-box" aria-hidden="true"></span>
         <span id="checkbox-label">I'm not a robot</span>
-        <span class="widget-brand"><span class="brand-symbol" aria-hidden="true">⟳</span><span id="brand-name">reCAPTCHA</span><small>Privacy · Terms</small></span>
+        <span class="widget-brand recaptcha-brand"><img src="/brands/recaptcha.png" width="32" height="32" alt="" /><span>reCAPTCHA</span><small>Privacy - Terms</small></span>
+        <span class="widget-brand turnstile-brand"><img src="/brands/cloudflare.svg" width="76" height="29" alt="Cloudflare" /><small>Privacy · Terms</small></span>
       </button>
     </div>
     <ImageChallenge />
@@ -59,10 +60,9 @@ import SliderChallenge from '../components/SliderChallenge.astro';
         button.addEventListener('click', async () => {
           kind = button.dataset.challenge ?? 'image';
           dialog.dataset.kind = kind;
+          dialog.dataset.phase = 'checkbox';
           const checkboxLabel = document.querySelector('#checkbox-label');
-          const brandName = document.querySelector('#brand-name');
           if (checkboxLabel) checkboxLabel.textContent = kind === 'image' ? "I'm not a robot" : 'Verify you are human';
-          if (brandName) brandName.textContent = kind === 'image' ? 'reCAPTCHA' : 'CLOUDFLARE';
           document.dispatchEvent(new Event('challenge-reset'));
           checkboxStep.hidden = false;
           image.hidden = true;
@@ -76,6 +76,7 @@ import SliderChallenge from '../components/SliderChallenge.astro';
         });
       });
       checkbox.addEventListener('click', () => {
+        dialog.dataset.phase = 'challenge';
         checkboxStep.hidden = true;
         const challenge = kind === 'slider' ? slider : image;
         if (challenge) {
@@ -115,20 +116,31 @@ import SliderChallenge from '../components/SliderChallenge.astro';
     .fullscreen-option input { width: 19px; height: 19px; accent-color: var(--accent); }
     .demo-note { margin-top: 40px; font-size: .8rem; }
     #fullscreen-status { font-size: .8rem; }
-    dialog { width: min(560px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid #ccc; border-radius: 3px; background: #fff; color: var(--text); font-family: Arial, sans-serif; }
+    dialog { width: min(400px, calc(100% - 32px)); max-height: calc(100dvh - 64px); padding: 0; border: 1px solid #ccc; border-radius: 3px; background: #fff; color: #111; font-family: Arial, sans-serif; overflow: visible; }
+    dialog[data-phase='checkbox'] { width: 304px; border: 0; background: transparent; }
+    dialog[data-phase='checkbox'][data-kind='slider'] { width: 300px; }
+    dialog[data-phase='challenge'][data-kind='slider'] { width: min(380px, calc(100% - 32px)); }
     dialog::backdrop { background: #ffffffb3; backdrop-filter: blur(7px); }
-    .challenge-top { display: flex; justify-content: space-between; align-items: center; gap: 20px; font-size: .65rem; padding: 6px 12px; }
-    #close-challenge { width: 32px; height: 32px; background: #fff; border: 0; border-radius: 0; }
-    #checkbox-step { padding: 24px; }
-    #checkbox-step h2 { margin-top: 0; font-size: 1.5rem; }
-    #checkbox-step p { font-size: .85rem; }
-    #human-checkbox { display: flex; align-items: center; gap: 16px; width: 100%; min-height: 100px; padding: 16px; border: 1px solid #d3d3d3; border-radius: 3px; background: #fafafa; color: #111; text-align: left; font-size: .85rem; }
-    .checkbox-box { flex-shrink: 0; width: 32px; height: 32px; border: 2px solid #777; background: white; }
-    .widget-brand { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-left: auto; font-size: .65rem; color: #555; white-space: nowrap; }
-    .brand-symbol { font-size: 38px; line-height: 1; color: #4285f4; }
-    .widget-brand small { font-size: .5rem; }
-    [data-kind='slider'] .brand-symbol { color: #f38020; }
-    [data-kind='slider'] #human-checkbox { background: #fff; }
-    @media (max-width: 480px) { .selection { margin-top: 8vh; } #checkbox-step { padding: 16px; } #human-checkbox { gap: 10px; padding: 12px; } }
+    #close-challenge { display: grid; place-items: center; position: absolute; right: -5px; top: -36px; width: 28px; height: 28px; padding: 0; color: #555; background: transparent; border: 0; border-radius: 3px; }
+    #close-challenge:hover { color: #000; background: #eee; }
+    #checkbox-step { padding: 0; }
+    #human-checkbox { display: flex; align-items: center; gap: 12px; width: 304px; height: 78px; padding: 0 11px 0 12px; border: 1px solid #d3d3d3; border-radius: 3px; background: #fafafa; color: #000; text-align: left; font-family: Arial, sans-serif; font-size: 14px; font-weight: 400; box-shadow: 0 1px 4px #00000014; }
+    #checkbox-label { white-space: nowrap; line-height: 17px; }
+    .checkbox-box { flex-shrink: 0; width: 28px; height: 28px; border: 2px solid #444746; border-radius: 2px; background: #fff; }
+    #human-checkbox:hover .checkbox-box { border-color: #888; }
+    .widget-brand { display: flex; flex-direction: column; align-items: center; margin-left: auto; font-size: 10px; line-height: 12px; color: #555; white-space: nowrap; }
+    .recaptcha-brand { align-self: stretch; justify-content: center; padding-top: 3px; width: 60px; }
+    .recaptcha-brand img { margin-bottom: 3px; }
+    .widget-brand small { display: block; font-size: 8px; line-height: 10px; margin-top: 2px; }
+    .turnstile-brand { display: none; }
+    [data-kind='slider'] #human-checkbox { width: 300px; height: 65px; gap: 8px; padding: 0 12px; border-color: #e0e0e0; border-radius: 0; box-shadow: none; }
+    [data-kind='slider'] .checkbox-box { width: 24px; height: 24px; border: 2px solid #6d6d6d; border-radius: 0; }
+    [data-kind='slider'] .recaptcha-brand { display: none; }
+    [data-kind='slider'] .turnstile-brand { display: flex; }
+    [data-kind='slider'] .turnstile-brand small { font-size: 9px; }
+    :global([data-contrast='high']) #human-checkbox { border-color: #000; background: #fff; }
+    :global([data-contrast='high']) .checkbox-box { border-color: #000; }
+    :global([data-contrast='high']) .widget-brand { color: #000; }
+    @media (max-width: 480px) { .selection { margin-top: 8vh; } }
   </style>
 </Page>
