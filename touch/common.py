@@ -29,7 +29,35 @@ def connect_follower(port, robot_id, robot_type="so101", hold=True):
     cls, cfg = (SO100Follower, SO100FollowerConfig) if robot_type == "so100" else (SO101Follower, SO101FollowerConfig)
     robot = cls(cfg(port=port, id=robot_id, disable_torque_on_disconnect=not hold))
     robot.connect()
+    set_servo_accel(robot)
     return robot
+
+
+def set_servo_accel(robot, accel=None):
+    """The servos' own acceleration limit. LeRobot sets the maximum (254): every new target is
+    chased at full force = jerky. Lower = softer starts and stops done by the servo itself.
+    SERVO_ACCEL in lr.conf (default 80; 0 = leave LeRobot's maximum). Unit ~8.8 deg/s^2."""
+    import os
+    accel = int(os.environ.get("SERVO_ACCEL", 80) if accel is None else accel)
+    if accel <= 0:
+        return
+    for m in ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"):
+        try:
+            robot.bus.write("Acceleration", m, min(accel, 254))
+        except Exception as e:
+            print(f"(couldn't set servo acceleration on {m}: {e})")
+            return
+
+
+# The old playback loop slept a fixed 20 ms PLUS the USB time each step, so every move really took
+# ~1.6x its nominal time. Moves are now paced by the clock; TEMPO keeps the same real speed you know.
+TEMPO = 1.6
+
+
+def min_jerk(t):
+    """0..1 -> 0..1 with zero speed AND zero acceleration at both ends (the smoothest start/stop)."""
+    t = np.clip(t, 0.0, 1.0)
+    return t * t * t * (10 - 15 * t + 6 * t * t)
 
 
 def connect_leader(port, leader_id, robot_type="so101"):
@@ -51,14 +79,16 @@ def send_joints(robot, q):
 
 
 def move_to(robot, target, seconds=1.0, hz=50):
-    """Smooth joint-space move from the current pose to `target`."""
+    """Smooth joint-space move from the current pose to `target` (minimum-jerk, real-time paced)."""
     start = read_joints(robot)
-    steps = max(1, int(seconds * hz))
-    for i in range(1, steps + 1):
-        s = i / steps
-        s = s * s * (3 - 2 * s)  # ease in/out
-        send_joints(robot, start + (target - start) * s)
-        time.sleep(1 / hz)
+    seconds *= TEMPO
+    t0 = time.monotonic()
+    while True:
+        tt = (time.monotonic() - t0) / max(seconds, 1e-3)
+        send_joints(robot, start + (target - start) * min_jerk(tt))
+        if tt >= 1:
+            break
+        time.sleep(max(0.0, t0 + (int(tt * seconds * hz) + 1) / hz - time.monotonic()))
 
 
 def countdown(seconds, what="get ready"):
@@ -289,7 +319,7 @@ class SafetyEnvelope:
 
 
 def follow_path(robot, P, seconds, hz=50, slow_end=0.0, guard=None, guard_from=0.6, start=None,
-                reset_guard=True):
+                reset_guard=True, ease=True):
     """Play a path of poses over `seconds`. slow_end=0.3 spends extra time on the last 30%
     (gentle final approach to the screen). With a guard it stops pushing as soon as the
     screen reports a touch (any time) or the force check trips (from `guard_from` on).
@@ -298,20 +328,39 @@ def follow_path(robot, P, seconds, hz=50, slow_end=0.0, guard=None, guard_from=0
     if start is not None:
         s = np.linspace(0, 1, len(P))[:, None]
         P = P + (1 - s) * (start - P[0])
-    """Play a path of poses evenly over `seconds`."""
-    steps = max(2, int(seconds * hz))
-    x, xn = np.linspace(0, 1, len(P)), np.linspace(0, 1, steps)
-    if slow_end > 0:  # warp time: the last `slow_end` of the path takes as long as the rest
-        k = 1 - slow_end
-        tt = np.linspace(0, 1, steps)
-        xn = np.where(tt < 0.5, tt / 0.5 * k, k + (tt - 0.5) / 0.5 * slow_end)
+    x = np.linspace(0, 1, len(P))
+    seconds *= TEMPO
+    progress = path_timing(slow_end, ease)
     if guard and reset_guard:
         guard.reset()
-    for t in xn:
+    t0 = time.monotonic()
+    while True:
+        # paced by the real clock, not by counting sleeps: slow USB reads can't make the motion stutter
+        tt = min(1.0, (time.monotonic() - t0) / max(seconds, 1e-3))
+        t = progress(tt)
         why = guard and ("touch" if guard.touched() else "force" if t >= guard_from and guard.check() else None)
         if why:
             send_joints(robot, read_joints(robot))  # stop pushing: hold where it is
             return why
         send_joints(robot, np.array([np.interp(t, x, P[:, j]) for j in range(P.shape[1])]))
-        time.sleep(1 / hz)
-    return None
+        if tt >= 1:
+            return None
+        time.sleep(max(0.0, t0 + (int(tt * seconds * hz) + 1) / hz - time.monotonic()))
+
+
+def path_timing(slow_end=0.0, ease=True):
+    """time (0..1) -> how far along the path (0..1). ease: start and stop with zero speed and
+    acceleration (minimum jerk). slow_end: the last `slow_end` of the path is covered more slowly
+    (taking as long as the rest), with a smooth change of speed instead of a sudden one."""
+    xs = np.linspace(0, 1, 2001)
+    if slow_end > 0:
+        k = 1 - slow_end
+        v_slow = slow_end / k
+        blend = np.clip((xs - (k - 0.08)) / 0.16, 0, 1)
+        blend = blend * blend * (3 - 2 * blend)
+        speed = 1 - (1 - v_slow) * blend
+    else:
+        speed = np.ones_like(xs)
+    T = np.concatenate([[0], np.cumsum((1 / speed[1:] + 1 / speed[:-1]) / 2 * np.diff(xs))])
+    T /= T[-1]
+    return lambda tt: float(np.interp(min_jerk(tt) if ease else tt, T, xs))

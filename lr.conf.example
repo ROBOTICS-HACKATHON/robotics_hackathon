@@ -28,6 +28,11 @@ SCREEN_WIDTH_MM=300
 # wrist = wrist flex + roll + gripper, none = nothing
 WRIST_LOCK=roll
 
+# Servo acceleration: lower = smoother, softer starts/stops (LeRobot default is the max, 254 = jerky).
+# 50 softer (may lag and overshoot a little), 80 default, 120 snappier, 0 = leave LeRobot's setting.
+# Try settings first without the arm: ./lr smooth-preview --accel 80 --speed 1.0
+SERVO_ACCEL=80
+
 # Seconds to switch from the terminal to the page before a picture or a tap run starts
 # (page and terminal on the same screen). 0 = start right away.
 DELAY=5

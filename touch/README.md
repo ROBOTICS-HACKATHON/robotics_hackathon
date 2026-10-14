@@ -176,7 +176,8 @@ The arm covers the screen while tapping, so call `see` **before** tapping, with 
 | Taps don't register | The test output says why: "stopped short" = blocked or weak; "reached its pose" = press deeper with `--press 0.08`; "force guard stopped it" = `--max-load 300`. Also try `--dwell 0.4` |
 | Taps miss by a bit everywhere | Redo `touch-calib` and touch the dot centres more carefully |
 | Taps miss more near the edges | `touch-calib` with a 4×4 grid: open `calib.html?grid=4`, add `--grid 4` in `lr` |
-| Too slow / too jerky | `--speed 1.5` or `--speed 0.7` |
+| Too slow / too fast | `--speed 1.5` or `--speed 0.7` |
+| Jerky movement | `SERVO_ACCEL` in `lr.conf` (default 80; lower = softer, too low lags and overshoots). Try settings without the arm first: `./lr smooth-preview --accel 60 --speed 0.8` draws joint speeds old vs new in `outputs/smoothness.png` |
 | Arm drags across the screen | Recalibrate and lift higher on your way to and from each target: the arm copies your path |
 | Path still shaky / too rounded | `--smooth 0.15` smoother, `--smooth 0.04` closer to your raw movement |
 | Want to move the home pose | `./lr set-home` (keeps the targets, but recorded paths still start from the old home) |

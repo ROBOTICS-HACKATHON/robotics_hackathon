@@ -52,7 +52,7 @@ user_flags() {
 }
 
 common_flags() {
-  echo "$(user_flags) -e HOME=/tmp -e HF_HOME=/hf -v $LR_DATA:/hf -v $OUT:/work/outputs --ipc=host"
+  echo "$(user_flags) -e HOME=/tmp -e HF_HOME=/hf -e SERVO_ACCEL=${SERVO_ACCEL:-80} -v $LR_DATA:/hf -v $OUT:/work/outputs --ipc=host"
 }
 
 need_image() {
@@ -280,6 +280,11 @@ cmd_tip-live() {
     --screen-mm "${SCREEN_WIDTH_MM:-300}" --live --out /work/outputs
 }
 
+cmd_smooth-preview() {
+  run_hw python /repo/touch/smooth_preview.py --out /work/outputs/smoothness.png "$@"
+  say "Plot: outputs/smoothness.png"
+}
+
 cmd_share() {
   # copy photos + logs to a folder Windows (and Claude) can reach
   local dest="${SHARE_DIR:-}"
@@ -341,6 +346,8 @@ Touch screen
   tip-test [CAM1,CAM2]      Tip vision check: sticker found?, viewing angles, can the pair measure height?
   tip-live                  Live browser view of both cameras + tip height in mm (no arm needed)
                             (save photos, click the pen tip to teach its colour)
+  smooth-preview [--accel N --speed S --smooth X]
+                            Simulate how smooth a tap moves (no arm): old vs new, -> outputs/smoothness.png
   share                     Copy saved photos + logs to Downloads/robot-share (to send for analysis)
 
   shell                     Open a shell inside the container
@@ -349,7 +356,7 @@ EOF
 
 c="${1:-help}"; shift || true
 case "$c" in
-  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice|cam-test|tip-test|heatmap|tip-live|share)
+  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice|cam-test|tip-test|heatmap|tip-live|share|smooth-preview)
     "cmd_$c" "$@" ;;
   *) cmd_help; exit 1 ;;
 esac
