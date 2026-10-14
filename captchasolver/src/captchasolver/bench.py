@@ -285,6 +285,48 @@ async def execute_actions(page: Page, doc: dict) -> tuple[bool, bool]:
     return await _outcome(page), clicked_ok
 
 
+async def _save_after(page: Page, path: Path) -> str:
+    """Screenshot the page once the site has answered (the success page after an accept, the error state
+    after a reject). Waits for a redirect in flight to finish, so it is not a blank page. Never raises."""
+    try:
+        await page.wait_for_load_state("load", timeout=8000)
+    except Exception:  # noqa: BLE001 - a slow load still deserves a screenshot
+        pass
+    try:
+        await page.screenshot(path=str(path))
+    except Exception:  # noqa: BLE001
+        return ""
+    return page.url
+
+
+def bundle_zip(records: list, out_dir: Path, zip_path: Path, config: dict, summary: dict) -> Path:
+    """One folder per challenge (before.png, solver.json, plan.png, after.png) + report.json + README.txt."""
+    import zipfile
+    parts = {".png": "before.png", ".json": "solver.json", ".plan.png": "plan.png", ".after.png": "after.png"}
+    zip_path = Path(zip_path).expanduser()
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for r in sorted(records, key=lambda r: r.index):
+            stem = f"{r.index:03d}-{r.label}"
+            for suffix, name in parts.items():
+                f = out_dir / f"{stem}{suffix}"
+                if f.exists():
+                    z.write(f, f"{stem}/{name}")
+        z.writestr("report.json", json.dumps({
+            "config": config, "summary": summary,
+            "records": [asdict(r) | {"cause": failure_cause(r)} for r in sorted(records, key=lambda r: r.index)]}, indent=2))
+        z.writestr("README.txt", (
+            "captchasolver example run\n\n"
+            "One folder per challenge:\n"
+            "  before.png   what the solver saw (the full-screen screenshot)\n"
+            "  solver.json  what it decided: target, tiles, click positions and the ordered `actions`;\n"
+            "               `outcome` records what the site answered after those clicks\n"
+            "  plan.png     the plan drawn on before.png (green = picked tiles, orange = Verify)\n"
+            "  after.png    the page after the site answered (success page, or the error state)\n"
+            "report.json    summary and one record per challenge\n"))
+    return zip_path
+
+
 async def _run_files(page: Page, ai: WorkersAI, rec: Record, *, url: str, out_dir: Path,
                      mode: str, model: str, fail_dir: Path | None) -> None:
     """screenshot -> examples/NNN-label.png -> solver JSON on disk -> act on the JSON."""
@@ -298,9 +340,13 @@ async def _run_files(page: Page, ai: WorkersAI, rec: Record, *, url: str, out_di
     doc = {"challenge": {"index": rec.index, "label": rec.label, "url": url},
            "viewport": [vw, vh], "model": model, **res}
     stem.with_suffix(".json").write_text(json.dumps(doc, indent=2) + "\n")
+    annotate(img, lay, res).save(stem.with_suffix(".plan.png"))      # what the solver planned, drawn on its screenshot
     # act from the saved file, exactly as a robot reading it later would
     rec.passed, rec.clicked_ok = await execute_actions(
         page, json.loads(stem.with_suffix(".json").read_text()))
+    final_url = await _save_after(page, stem.with_suffix(".after.png"))   # the page once the site has answered
+    doc["outcome"] = {"passed": rec.passed, "tiles_clicked_as_planned": rec.clicked_ok, "final_url": final_url}
+    stem.with_suffix(".json").write_text(json.dumps(doc, indent=2) + "\n")
     await _record_outcome(page, rec, fail_dir, plan=(img, lay, res))
 
 
@@ -481,7 +527,7 @@ def replay_main() -> None:
         progress=lambda r, k, n: print(format_line(r, k, n, color), flush=True),
         note=lambda m: print(paint(m, "yellow", color), flush=True)))
     print(format_summary(records, summary, color))
-    saved = [r.fail_image for r in records if r.fail_image]
+    saved = [r.fail_image for r in records if r.fail_image and Path(r.fail_image).exists()]
     if saved:
         print(paint(f"\n📷 {len(saved)} failure image(s) in {Path(saved[0]).parent}", "dim", color))
 
@@ -509,10 +555,19 @@ def main() -> None:
     p.add_argument("--save-failures", metavar="DIR",
                    help="where failure images go (default: <examples>/failed_runs)")
     p.add_argument("--no-fail-images", action="store_true", help="don't save failure images")
+    p.add_argument("--zip", metavar="PATH", help="write a zip of this run's screenshots and JSON (implies --pipeline "
+                                                  "files, and keeps the files out of examples/)")
     p.add_argument("--color", choices=["auto", "always", "never"], default="auto")
     p.add_argument("--headed", action="store_true")
     a = p.parse_args()
     color = use_color(a.color)
+    tmp = None
+    if a.zip:
+        import tempfile
+        a.pipeline = "files"
+        if not a.out_dir:
+            tmp = tempfile.TemporaryDirectory(prefix="captchasolver-zip-")
+            a.out_dir = tmp.name
 
     records, summary = asyncio.run(run_tests(
         a.url, count=a.count, split=a.split, seed=a.seed, concurrency=a.concurrency,
@@ -523,7 +578,13 @@ def main() -> None:
         note=lambda m: print(paint(m, 'yellow', color), flush=True)))
 
     print(format_summary(records, summary, color))
-    saved = [r.fail_image for r in records if r.fail_image]
+    if a.zip:
+        config = {k: v for k, v in vars(a).items() if k not in ("zip", "report", "out_dir")} | {"viewport": list(a.viewport)}
+        done = bundle_zip(records, Path(a.out_dir), Path(a.zip), config, summary)
+        print(paint(f"\n📦 {done}  ({done.stat().st_size // 1024} KB, {len(records)} challenge folders)", "bold", color))
+        if tmp:
+            tmp.cleanup()
+    saved = [r.fail_image for r in records if r.fail_image and Path(r.fail_image).exists()]
     if saved:
         print(paint(f"\n📷 {len(saved)} failure image(s) in {Path(saved[0]).parent}", "dim", color))
     if a.report:

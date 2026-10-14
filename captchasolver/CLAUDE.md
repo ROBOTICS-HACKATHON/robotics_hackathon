@@ -143,6 +143,12 @@ Real input is a **photo of the screen**, straightened to screen size by the robo
   not credentials problems, and the robot is told `retry` accordingly. Keep this classification when adding
   new upstream calls.
 
+- The `files` pipeline saves, per challenge, `before` / `solver.json` / `.plan.png` / `.after.png`, and records
+  the site's `outcome` in the JSON. `.after.png` goes through `_save_after`, which waits for a redirect in
+  flight (otherwise it is a blank page). `--zip` bundles one run (`bundle_zip`). When adding code to a CLI,
+  check WHICH `main` you are editing: `main` and `replay_main` print similar summaries and an edit once landed
+  in the wrong one.
+
 ## Git hygiene
 
 Also ignored: `cloudflare/node_modules`, `.wrangler`, `.dev.vars`. Commit `cloudflare/package-lock.json`.

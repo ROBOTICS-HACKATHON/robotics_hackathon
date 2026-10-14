@@ -64,3 +64,59 @@ async def test_silence_is_an_error_never_a_fail():
 async def test_a_redirect_slower_than_the_timeout_is_an_error_not_a_fail():
     with pytest.raises(bench.SiteDidNotAnswer):
         await run("nav", nav_delay=6, timeout_ms=1500)
+
+
+async def test_the_after_screenshot_waits_for_a_slow_redirect_so_it_is_not_blank(tmp_path):
+    """A passing run: Verify starts a slow redirect. The 'after' image must be the page it lands on."""
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch()
+        page = await browser.new_page()
+
+        async def handler(route):
+            if route.request.url.rstrip("/").endswith("/verified"):
+                await asyncio.sleep(2.5)
+                await route.fulfill(body="<body style='background:#1e8e3e;margin:0'><h1>Verified</h1></body>", content_type="text/html")
+            else:
+                await route.fulfill(body=PAGE, content_type="text/html")
+        await page.route("**/*", handler)
+        await page.goto("http://mock.test/#nav")
+        await page.click(".verify-button")
+        assert await bench._outcome(page, timeout_ms=15000) is True          # the redirect has only just committed
+        out = tmp_path / "after.png"
+        url = await bench._save_after(page, out)
+        await browser.close()
+    assert url.rstrip("/").endswith("/verified")
+    from PIL import Image
+    import numpy as np
+    px = np.asarray(Image.open(out).convert("RGB")).reshape(-1, 3)
+    assert (np.abs(px - [30, 142, 62]).max(1) < 12).mean() > 0.9            # the green success page, not a blank one
+
+
+def test_the_zip_has_one_folder_per_challenge_and_only_this_runs_files(tmp_path):
+    import json
+    import zipfile
+    out = tmp_path / "run"
+    out.mkdir()
+    recs = [bench.Record(5, "cats-1", "train", subject="cats", target="cats", tiles=[0], clicked_ok=True, passed=True),
+            bench.Record(9, "dogs-2", "train", subject="dogs", target="dogs", tiles=[1], clicked_ok=True)]
+    for r in recs:
+        for suffix in (".png", ".json", ".plan.png", ".after.png"):
+            (out / f"{r.index:03d}-{r.label}{suffix}").write_bytes(b"x")
+    (out / "042-other-1.png").write_bytes(b"x")                              # a stranger from an earlier run
+    z = bench.bundle_zip(recs, out, tmp_path / "sub" / "example.zip", {"count": 2}, bench.summarize(recs))
+    names = sorted(zipfile.ZipFile(z).namelist())
+    assert names == ["005-cats-1/after.png", "005-cats-1/before.png", "005-cats-1/plan.png", "005-cats-1/solver.json",
+                     "009-dogs-2/after.png", "009-dogs-2/before.png", "009-dogs-2/plan.png", "009-dogs-2/solver.json",
+                     "README.txt", "report.json"]
+    rep = json.loads(zipfile.ZipFile(z).read("report.json"))
+    assert rep["summary"]["total"] == 2 and rep["config"] == {"count": 2}
+    assert [r["label"] for r in rep["records"]] == ["cats-1", "dogs-2"]
+
+
+def test_a_missing_file_does_not_break_the_zip(tmp_path):
+    import zipfile
+    out = tmp_path
+    r = bench.Record(1, "cats-1", "train", error="TimeoutError: x")
+    (out / "001-cats-1.png").write_bytes(b"x")                                 # the run died before JSON/after existed
+    z = bench.bundle_zip([r], out, tmp_path / "e.zip", {}, bench.summarize([r]))
+    assert sorted(zipfile.ZipFile(z).namelist()) == ["001-cats-1/before.png", "README.txt", "report.json"]

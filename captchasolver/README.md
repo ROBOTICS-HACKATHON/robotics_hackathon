@@ -105,6 +105,7 @@ captchasolver test                              # 100 shuffled challenges, 4 in 
 captchasolver test --count 20 --split test      # the held-out test split
 captchasolver test --pipeline files             # save PNG + JSON to examples/, then act on the JSON
 captchasolver replay                            # replay those JSONs for free
+captchasolver test --count 3 --zip ~/example.zip   # a few challenges, with their screenshots and JSON, in one zip
 ```
 
 - `--seed` makes the challenge selection reproducible. `--viewport WxH` and `--dpr` test other
@@ -135,6 +136,10 @@ captchasolver replay                            # replay those JSONs for free
   accepted (success state or the redirect to `/verified/`) or rejected ("Incorrect selection"). If the site says
   neither, the challenge is a 💥 **error** (`SiteDidNotAnswer`), never a ❌ fail, so a slow site or container
   cannot make correct answers look wrong.
+- **A zip to share (`--zip PATH`):** runs the `files` pipeline and bundles it: one folder per challenge with
+  `before.png` (what the solver saw), `solver.json` (target, tiles, ordered `actions`, and the site's `outcome`),
+  `plan.png` (the plan drawn on it) and `after.png` (the page after the site answered: the success page or the
+  error state), plus `report.json` and a `README.txt`. It does not touch `examples/`.
 - **Failure images:** every failure writes `examples/failed_runs/NNN-label.png` (the page after
   the failed Verify) and `NNN-label-plan.png` (the solver's plan drawn on its screenshot).
   Crashes write `NNN-label-error.png`. Disable with `--no-fail-images`.
