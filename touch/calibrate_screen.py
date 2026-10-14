@@ -28,8 +28,9 @@ p.add_argument("--grid", type=int, default=3, help="dots per side")
 p.add_argument("--http-port", type=int, default=8765)
 p.add_argument("--max-load", type=int, default=0,
                help="force guard: follower stops pushing when motor load jumps this much (0 = off)")
-p.add_argument("--free-wrist", action="store_true",
-               help="don't lock the wrist after home (not recommended: inconsistent wrist angles ruin in-between taps)")
+p.add_argument("--lock", default="roll", choices=["roll", "wrist", "none"],
+               help="what is held at its home angle after HOME: roll = wrist roll + gripper (wrist flex free), "
+                    "wrist = wrist flex + roll + gripper, none = nothing")
 args = p.parse_args()
 
 fr = np.linspace(0.15, 0.85, args.grid)
@@ -133,11 +134,15 @@ def record_return(step, home, touch, path, still=1.5, still_s=0.4):
 try:
     home, _ = wait_step(0, "HOME: hold the stylus a few cm ABOVE the middle of the screen, "
                            "wrist angled so the stylus points down at the screen", use_touch=False)
-    if not args.free_wrist:
-        LOCKED.update({"wrist_flex.pos": float(home[3]), "wrist_roll.pos": float(home[4]),
-                       "gripper.pos": float(home[5])})
-        print("    WRIST LOCKED at its home angle: steer only with base, shoulder and elbow.\n"
-              "    (moving the leader's wrist or trigger does nothing now)", flush=True)
+    if args.lock in ("roll", "wrist"):
+        LOCKED.update({"wrist_roll.pos": float(home[4]), "gripper.pos": float(home[5])})
+        if args.lock == "wrist":
+            LOCKED["wrist_flex.pos"] = float(home[3])
+        names = ", ".join(k.split(".")[0] for k in LOCKED)
+        print(f"    LOCKED at home: {names}  (moving those on the leader does nothing now)", flush=True)
+        if args.lock == "roll":
+            print("    Wrist flex is free: try to keep the stylus at about the SAME angle for every target\n"
+                  "    (very different wrist angles make taps between targets less accurate).", flush=True)
     points = []
     for i, (u, v) in enumerate(targets, 1):
         approach, retreat = [], []
@@ -153,7 +158,11 @@ try:
                        "target": target_uv, "touched": bool(landed), "frame_px": frame_px})
         print(f"    recorded path: down {approach[-1][0] - approach[0][0]:.1f}s, "
               f"up {retreat[-1][0] - retreat[0][0]:.1f}s")
-    calib = {"home": home.tolist(), "points": points, "wrist_locked": not args.free_wrist}
+    calib = {"home": home.tolist(), "points": points, "wrist_locked": args.lock == "wrist",
+             "locked": [k.split(".")[0] for k in LOCKED]}
+    spread = float(np.ptp([p["q"][3] for p in points]))
+    print(f"    wrist flex varied {spread:.0f} deg across the targets"
+          + ("  (OK)" if spread <= 15 else "  (a lot: in-between taps may miss more; practice will compensate)"))
     CALIB_FILE.write_text(json.dumps(calib))
     log = save_log("calib", calib)
     print(f"Session log: {log}")

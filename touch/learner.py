@@ -74,6 +74,8 @@ class LearnedModel:
         F = _features(self.uv[:, 0], self.uv[:, 1])
         W = self.w[:, None]
         self.global_coef = np.linalg.lstsq(F * np.sqrt(W), self.q * np.sqrt(W), rcond=None)[0]
+        n0 = len(pts)
+        self.calib_coef = np.linalg.lstsq(F[:n0], self.q[:n0], rcond=None)[0]
 
     def touch_pose(self, u, v):
         f = _features(np.array([u]), np.array([v]))[0]
@@ -86,6 +88,9 @@ class LearnedModel:
             A = F.T @ (F * w[:, None]) + self.ridge * w.sum() * np.eye(6)
             B = F.T @ (self.q * w[:, None]) + self.ridge * w.sum() * self.global_coef
             q = f @ np.linalg.solve(A, B)  # local fit, pulled toward the global one
+        # never stray far from the calibration-only fit (protects against wild extrapolation)
+        f0 = _features(np.array([u]), np.array([v]))[0] @ self.calib_coef
+        q[:5] = np.clip(q[:5], f0[:5] - 8.0, f0[:5] + 8.0)
         q[-1] = self.home[-1]
         return q
 
@@ -267,7 +272,7 @@ def refine(tapper, server, model, exp, bandit, target, tol_px, max_tries, rng, l
     """Feedback loop for one target: tap, see where it landed, correct the JOINT pose, retry
     until within tol_px. Every attempt is stored as experience and updates the model."""
     u, v = target
-    q = model.touch_pose(u, v)
+    q = tapper.safety.clamp(model.touch_pose(u, v), tapper.base_model.touch_pose(u, v))
     J = model.jacobian(u, v)
     zone = bandit.zone(u, v)
     base_speed = tapper.speed
@@ -306,16 +311,22 @@ def refine(tapper, server, model, exp, bandit, target, tol_px, max_tries, rng, l
                          "vision_height": lv.get("height") if lv else None})
         log(f"   try {k} (zone {zone}): press {press:<4} {'slow' if slow < 1 else 'norm'} "
             + (f"miss {err_px:5.1f}px" if err_px is not None else "NO TOUCH  ")
-            + f"  reward {r:+.2f}" + ("  [force stop]" if tapper.last_force_stop else ""))
+            + f"  reward {r:+.2f}" + ("  [force stop]" if tapper.last_force_stop else "")
+            + (("  [cam: " + ("tip not seen" if not lv or lv.get("landing") is None else
+                ("REJECTED (implausible)" if lv.get("rejected") else
+                 f"predicted miss {np.hypot((lv['landing'][0] - u) * (w if got else 1000), (lv['landing'][1] - v) * (h if got else 1000)):.0f}px"))
+                + ("" if getattr(tapper.vision, "ready", False) else ", learning") + "]")
+               if getattr(tapper, "vision", None) is not None and tapper.vision.enabled else ""))
         if err_px is not None and err_px <= tol_px:
             break
         if err_px is not None:
             # where we landed tells us how the arm really moves: step the joints toward the target
-            q = q_used + gain * (J @ -miss)  # correct from the pose that was really used
+            # correct from the pose that was really used, in limited steps, never far from calibration
+            q = tapper.safety.step(q_used, gain * (J @ -miss), tapper.base_model.touch_pose(u, v))
             q[-1] = model.home[-1]
         else:
             # no touch: go a little deeper next time along the approach direction (towards the screen)
-            q = q_used + 0.15 * (q_used - model.home) * 0.1
+            q = tapper.safety.step(q_used, 0.015 * (q_used - model.home), tapper.base_model.touch_pose(u, v))
     tapper.speed = base_speed
     exp.save()
     if getattr(tapper, "vision", None) is not None and tapper.vision.enabled:

@@ -229,7 +229,7 @@ cmd_touch-calib() {
   ip=$( (ip route get 1.1.1.1 2>/dev/null || true) | awk '{for(i=1;i<NF;i++) if($i=="src") print $(i+1)}')
   say "On the touch screen open: http://localhost:8765/  (same computer)  or  http://${ip:-<this-computer-ip>}:8765/"
   RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/calibrate_screen.py --follower-port "$FOLLOWER_PORT" --leader-port "$LEADER_PORT" \
-    --follower-id "$FOLLOWER_ID" --leader-id "$LEADER_ID" --robot "$ROBOT"
+    --follower-id "$FOLLOWER_ID" --leader-id "$LEADER_ID" --robot "$ROBOT" --lock "${WRIST_LOCK:-roll}" "$@"
 }
 
 cmd_practice() {

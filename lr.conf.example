@@ -22,6 +22,10 @@ VISION=off
 # Colour of the stylus tip marker: pink, green, orange, yellow, blue, or a custom HSV range "h1,s1,v1,h2,s2,v2"
 TIP_COLOR=pink
 
+# What touch-calib holds still after HOME: roll = wrist roll + gripper (wrist flex free),
+# wrist = wrist flex + roll + gripper, none = nothing
+WRIST_LOCK=roll
+
 # Seconds to switch from the terminal to the page before a picture or a tap run starts
 # (page and terminal on the same screen). 0 = start right away.
 DELAY=5

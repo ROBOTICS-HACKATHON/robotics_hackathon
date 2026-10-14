@@ -17,7 +17,7 @@ import time
 
 import numpy as np
 
-from common import (ForceGuard, countdown, ScreenModel, connect_follower, follow_path, load_calib, move_to,
+from common import (ForceGuard, SafetyEnvelope, countdown, ScreenModel, connect_follower, follow_path, load_calib, move_to,
                     read_joints, set_torque_limit, settle)
 
 
@@ -41,6 +41,8 @@ class Tapper:
         """
         calib = load_calib()
         self.model = ScreenModel(calib, smooth_s=smooth)
+        self.base_model = ScreenModel(calib, smooth_s=smooth)  # plain calibration, never replaced
+        self.safety = SafetyEnvelope(calib)
         self.own_path = own_path and self.model.has_paths
         from correction import Correction, calib_id
         from learner import Experience, LearnedModel, ZoneBandit, zone_centers
@@ -110,6 +112,8 @@ class Tapper:
     def _tap_own_path(self, u, v, touch):
         """home -> your smoothed path down -> small press -> your smoothed path back up -> home.
         The force guard stops the push the moment the motors strain against the glass."""
+        base = self.base_model.touch_pose(u, v)
+        touch = self.safety.clamp(touch, base)  # never far from what you taught
         self.go_home()
         self.at_home = False
         down, t_down = self.model.path("approach", u, v, touch)
@@ -173,7 +177,11 @@ class Tapper:
             err = np.array(est["landing"]) - [u, v]
             if np.hypot(*err) < tol:
                 break
-            touch = touch + self.vision_gain * (J @ -err)  # aim the joints so the tip lands on target
+            if np.hypot(*err) > 0.08:  # camera says >8% of the screen off: don't trust it
+                est["rejected"] = True
+                break
+            # aim the joints so the tip lands on target, in small limited steps
+            touch = self.safety.step(touch, self.vision_gain * (J @ -err), self.base_model.touch_pose(u, v))
             touch[-1] = self.model.home[-1]
         return touch, why
 
@@ -283,9 +291,9 @@ if __name__ == "__main__":
         print(f"learned model: {len(t.exp)} past touches, press {t.press}" if t.learned else t.correction.describe())
         err = ", ".join(f"{e:.1f}" for e in t.model.fit_error[:5])
         print(f"Calibration fit error per joint (degrees): {err}")
-        if t.model.wrist_spread > 5:
-            print(f"WARNING: the wrist angle varied {t.model.wrist_spread:.0f} deg between calibration targets, "
-                  "so taps between targets will miss.\n         Recalibrate: ./lr touch-calib now locks the wrist.")
+        if t.model.wrist_spread > 15:
+            print(f"note: the wrist flex varied {t.model.wrist_spread:.0f} deg between calibration targets; taps "
+                  "between targets may miss more (practice compensates, or recalibrate with a steadier wrist).")
         if t.own_path:
             m = t.model
             print(f"Replaying your recorded paths: down {m.path_time['approach'] / a.speed:.1f}s, "

@@ -22,9 +22,9 @@ Positions on the screen are always **u, v from 0 to 1**: u goes left to right, v
    ```
    On the touch screen, open the address it prints (`http://localhost:8765/` when the touch screen is plugged into this computer) full-screen (F11).
    - Hold the stylus a few cm **above** the middle of the screen with the leader arm (home), wrist angled so the
-     stylus points down at the screen, press Enter. **The wrist is then locked** at that angle: steer each target
-     with only the base, shoulder and elbow. (A different wrist angle per target is what made taps between
-     targets miss up/down.)
+     stylus points down at the screen, press Enter. The **wrist roll and gripper are then held** at that pose
+     (`WRIST_LOCK=roll`, default); wrist flex stays free, so try to keep the stylus at about the same angle for
+     every target. `WRIST_LOCK=wrist` also holds wrist flex (most consistent), `none` holds nothing.
    - For each **highlighted target**: move down and touch it, then lift straight up back to home and **hold still** for a moment. The next target lights up by itself.
    - Your whole movement is recorded. Taps later replay a **smoothed** version of your own path, so move the way you want the robot to move: up and over, never sliding on the glass.
    - Touches outside the highlighted target are ignored.

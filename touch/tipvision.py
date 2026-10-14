@@ -35,6 +35,7 @@ from see import ScreenCamera
 HERE = Path(__file__).resolve().parent
 MODEL_FILE = HERE / "tip_model.json"
 MIN_SAMPLES = 5
+MAX_VALID_ERR = 0.02  # camera must predict held-out taps within ~2% of the screen before it may correct
 
 # HSV ranges (OpenCV: H 0-179). Several ranges per color are OR-ed.
 COLORS = {
@@ -159,8 +160,9 @@ class TipVision:
 
     @property
     def ready(self):
-        """Enough learned taps to trust the estimate for correcting the arm."""
-        return self.enabled and len(self.data["samples"]) >= MIN_SAMPLES
+        """Allowed to correct the arm: enough taps AND it has proven it predicts them accurately."""
+        return (self.enabled and len(self.data["samples"]) >= MIN_SAMPLES
+                and self.valid_err is not None and self.valid_err <= MAX_VALID_ERR)
 
     # ---- seeing ----
     def observe(self):
@@ -219,10 +221,35 @@ class TipVision:
         """A hover observation and where that tap really landed (from the page)."""
         if not obs or not any(obs):
             return
+        obs = [o if (o and -0.15 <= o["uv"][0] <= 1.15 and -0.15 <= o["uv"][1] <= 1.15) else None for o in obs]
+        if not any(obs):  # the camera saw something far off the screen: not the tip (or useless angle)
+            self.rejected = getattr(self, "rejected", 0) + 1
+            return
         self.data["samples"].append({"obs": obs, "landed": [float(landed[0]), float(landed[1])], "t": time.time()})
         self._fit()
 
     def _fit(self):
+        self._fit_offsets()
+        self.valid_err = self._validate()
+
+    def _validate(self):
+        """Leave-one-out: predict each learned tap from the others; mean error in screen units."""
+        S = self.data["samples"]
+        if len(S) < MIN_SAMPLES:
+            return None
+        errs = []
+        for i in range(len(S)):
+            keep = self.data["samples"]
+            self.data["samples"] = keep[:i] + keep[i + 1:]
+            self._fit_offsets()
+            est = self.estimate(S[i]["obs"])
+            self.data["samples"] = keep
+            if est["landing"] is not None:
+                errs.append(float(np.hypot(*(np.array(est["landing"]) - S[i]["landed"]))))
+        self._fit_offsets()
+        return float(np.mean(errs)) if errs else None
+
+    def _fit_offsets(self):
         self.off = {}
         S = self.data["samples"]
         for i in range(max(self.n, 2)):
@@ -247,8 +274,15 @@ class TipVision:
         if not self.enabled:
             return "tip vision: off (no camera)"
         s = len(self.data["samples"])
-        return (f"tip vision: {self.n} camera{'s' if self.n > 1 else ''} ({', '.join(self.specs)}), "
-                f"{s} learned taps" + (", correcting aim" if self.ready else f", learning only until {MIN_SAMPLES}"))
+        ve = self.valid_err
+        state = ("correcting aim" if self.ready else
+                 f"learning only (needs {MIN_SAMPLES} taps)" if s < MIN_SAMPLES else
+                 f"NOT trusted: predicts taps only to ~{100 * ve:.1f}% of the screen (needs <= {100 * MAX_VALID_ERR:.0f}%)"
+                 " - move the camera above the screen / put the marker right at the tip")
+        rj = getattr(self, "rejected", 0)
+        return (f"tip vision: {self.n} camera{'s' if self.n > 1 else ''} ({', '.join(self.specs)}), {s} learned taps"
+                + (f", accuracy ~{100 * ve:.1f}% of screen" if ve is not None else "") + f", {state}"
+                + (f", {rj} impossible readings ignored" if rj else ""))
 
 
 def check_setup(vision, out=Path("outputs")):

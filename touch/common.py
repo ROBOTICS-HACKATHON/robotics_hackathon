@@ -259,6 +259,35 @@ def settle(robot, target, tol=1.5, timeout=1.0, hz=50, guard=None):
     return err, None
 
 
+class SafetyEnvelope:
+    """Hard limits so no correction or learned model can send the arm somewhere wild.
+
+    * every joint stays inside the range you used during calibration (+ a small margin)
+    * a touch pose may differ from the plain calibration model by at most `max_dev` degrees
+    * one correction step moves each joint by at most `max_step` degrees
+    """
+
+    def __init__(self, calib, margin=6.0, max_dev=8.0, max_step=3.0):
+        q = np.array([p["q"] for p in calib["points"]] + [calib["home"]], float)
+        self.lo, self.hi = q.min(0) - margin, q.max(0) + margin
+        self.max_dev, self.max_step = max_dev, max_step
+        self.hits = 0  # how often a limit kicked in (reported in logs)
+
+    def clamp(self, q, base=None):
+        q = np.asarray(q, float).copy()
+        before = q.copy()
+        if base is not None:
+            q[:5] = np.clip(q[:5], base[:5] - self.max_dev, base[:5] + self.max_dev)
+        q[:5] = np.clip(q[:5], self.lo[:5], self.hi[:5])
+        if np.abs(q - before).max() > 1e-6:
+            self.hits += 1
+        return q
+
+    def step(self, q, delta, base=None):
+        d = np.clip(np.asarray(delta, float), -self.max_step, self.max_step)
+        return self.clamp(np.asarray(q, float) + d, base)
+
+
 def follow_path(robot, P, seconds, hz=50, slow_end=0.0, guard=None, guard_from=0.6, start=None,
                 reset_guard=True):
     """Play a path of poses over `seconds`. slow_end=0.3 spends extra time on the last 30%
