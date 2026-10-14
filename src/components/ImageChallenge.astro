@@ -1,12 +1,13 @@
 ---
-import { imageChallenge } from '../data/challenges';
+import { imageChallenges } from '../data/image-challenges';
+const imageChallenge = imageChallenges[0];
 ---
 
 <section id="image-challenge" class="image-challenge" aria-labelledby="image-heading" hidden>
   <header class="challenge-heading">
     <h2 id="image-heading">
-      <span>{imageChallenge.instruction}</span>
-      <strong>{imageChallenge.subject}</strong>
+      <span class="image-instruction">{imageChallenge.instruction}</span>
+      <strong class="image-subject">{imageChallenge.subject}</strong>
     </h2>
   </header>
   <div class="image-grid" role="group" aria-labelledby="image-heading">
@@ -32,7 +33,7 @@ import { imageChallenge } from '../data/challenges';
 </section>
 
 <script>
-  import { imageChallenge } from '../data/challenges';
+  import { imageChallenges, type ImageChallenge } from '../data/image-challenges';
 
   const section = document.querySelector<HTMLElement>('#image-challenge');
   const tiles = Array.from(document.querySelectorAll<HTMLButtonElement>('#image-challenge .image-tile'));
@@ -40,8 +41,11 @@ import { imageChallenge } from '../data/challenges';
   const count = document.querySelector<HTMLElement>('#image-challenge .selection-count');
   const verify = document.querySelector<HTMLButtonElement>('#image-challenge .verify-button');
   const resetButton = document.querySelector<HTMLButtonElement>('#image-challenge .reset-button');
+  const instruction = document.querySelector<HTMLElement>('#image-challenge .image-instruction');
+  const subject = document.querySelector<HTMLElement>('#image-challenge .image-subject');
 
   if (section && status && count && verify && resetButton) {
+    let activeChallenge: ImageChallenge = imageChallenges[0];
     const selected = new Set<number>();
     let state: 'idle' | 'success' | 'error' = 'idle';
 
@@ -81,7 +85,7 @@ import { imageChallenge } from '../data/challenges';
     });
 
     verify.addEventListener('click', () => {
-      const matches = imageChallenge.tiles.every((tile, index) => tile.correct === selected.has(index));
+      const matches = activeChallenge.tiles.every((tile, index) => tile.correct === selected.has(index));
       if (matches) {
         status.textContent = 'Verified. Challenge complete.';
         verify.disabled = true;
@@ -95,6 +99,27 @@ import { imageChallenge } from '../data/challenges';
 
     resetButton.addEventListener('click', reset);
     document.addEventListener('challenge-reset', reset);
+    document.addEventListener('challenge-select', (event) => {
+      if (!(event instanceof CustomEvent)) return;
+      const detail: unknown = event.detail;
+      if (!detail || typeof detail !== 'object'
+        || !('kind' in detail) || detail.kind !== 'image'
+        || !('index' in detail) || typeof detail.index !== 'number'
+        || !Number.isInteger(detail.index)) return;
+      const next = imageChallenges[detail.index];
+      if (!next) return;
+      activeChallenge = next;
+      if (instruction) instruction.textContent = next.instruction;
+      if (subject) subject.textContent = next.subject;
+      tiles.forEach((tile, index) => {
+        const photo = next.tiles[index];
+        const image = tile.querySelector<HTMLImageElement>('img');
+        if (!photo || !image) return;
+        image.src = photo.src;
+        image.alt = photo.alt;
+      });
+      reset();
+    });
   }
 </script>
 
