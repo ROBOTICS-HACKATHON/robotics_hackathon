@@ -138,6 +138,7 @@ def refine(tapper, server, model, exp, bandit, target, tol_px, max_tries, rng, l
         server.drain()
         server.set(target=[u, v], msg=f"target ({u:.2f},{v:.2f}) try {k}/{max_tries}")
         tapper.tap_pose(u, v, q)
+        q_used = tapper.last_touch_q if tapper.last_touch_q is not None else q
         time.sleep(0.3)
         got = server.all_touches()
         if got:
@@ -147,22 +148,29 @@ def refine(tapper, server, model, exp, bandit, target, tol_px, max_tries, rng, l
             err_px = float(np.hypot(miss[0] * w, miss[1] * h))
             r = reward(err_px, True, len(got), tapper.last_force_stop, tol_px)
             if learn:
-                exp.add(q, (g["u"], g["v"]), (u, v), r, press, {"try": k, "err_px": err_px})
+                exp.add(q_used, (g["u"], g["v"]), (u, v), r, press, {"try": k, "err_px": err_px})
+                if getattr(tapper, "vision", None) is not None and tapper.last_hover_obs:
+                    tapper.vision.learn(tapper.last_hover_obs, (g["u"], g["v"]))
         else:
             err_px, r = None, reward(0, False, 0, tapper.last_force_stop, tol_px)
         bandit.update(press, r)
+        lv = getattr(tapper, "last_vision", None)
         attempts.append({"try": k, "press": press, "err_px": err_px, "reward": r,
-                         "touches": len(got), "force_stop": tapper.last_force_stop})
+                         "touches": len(got), "force_stop": tapper.last_force_stop,
+                         "vision_pred": lv.get("landing") if lv else None,
+                         "vision_height": lv.get("height") if lv else None})
         log(f"   try {k}: press {press:<4} " + (f"miss {err_px:5.1f}px" if err_px is not None else "NO TOUCH  ")
             + f"  reward {r:+.2f}" + ("  [force stop]" if tapper.last_force_stop else ""))
         if err_px is not None and err_px <= tol_px:
             break
         if err_px is not None:
             # where we landed tells us how the arm really moves: step the joints toward the target
-            q = q + gain * (J @ -miss)
+            q = q_used + gain * (J @ -miss)  # correct from the pose that was really used
             q[-1] = model.home[-1]
         else:
             # no touch: go a little deeper next time along the approach direction (towards the screen)
-            q = q + 0.15 * (q - model.home) * 0.1
+            q = q_used + 0.15 * (q_used - model.home) * 0.1
     exp.save()
+    if getattr(tapper, "vision", None) is not None and tapper.vision.enabled:
+        tapper.vision.save()
     return attempts

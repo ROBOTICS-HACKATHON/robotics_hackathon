@@ -216,6 +216,14 @@ cmd_run() {
 # ---------- touch screen ----------
 ARM_ARGS() { echo "--port $FOLLOWER_PORT --id $FOLLOWER_ID --robot $ROBOT"; }
 
+# Cameras for the tip hover-check: VISION=auto uses CAMERA (+ CAMERA2 if set), VISION=off disables it
+VISION_CAMS() {
+  [ "${VISION:-off}" = off ] && { echo none; return; }
+  local c="${CAMERA:-}"
+  [ -n "${CAMERA2:-}" ] && c="${c:+$c,}$CAMERA2"
+  echo "${c:-none}"
+}
+
 cmd_touch-calib() {
   local ip
   ip=$( (ip route get 1.1.1.1 2>/dev/null || true) | awk '{for(i=1;i<NF;i++) if($i=="src") print $(i+1)}')
@@ -226,7 +234,8 @@ cmd_touch-calib() {
 
 cmd_practice() {
   # shellcheck disable=SC2046
-  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/practice.py $(ARM_ARGS) --delay "${DELAY:-5}" "$@"
+  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/practice.py $(ARM_ARGS) --delay "${DELAY:-5}" \
+    --cameras "$(VISION_CAMS)" --tip-color "${TIP_COLOR:-pink}" "$@"
 }
 
 cmd_fit() {
@@ -241,13 +250,20 @@ cmd_set-home() {
 cmd_tap() {
   [ $# -ge 1 ] || die "usage: ./lr tap u v [u v ...] | --test | --home   (u, v from 0 to 1)"
   # shellcheck disable=SC2046
-  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/tap.py $(ARM_ARGS) --delay "${DELAY:-5}" "$@"
+  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/tap.py $(ARM_ARGS) --delay "${DELAY:-5}" \
+    --cameras "$(VISION_CAMS)" --tip-color "${TIP_COLOR:-pink}" "$@"
 }
 
 cmd_see() {
   run_hw python /repo/touch/see.py --camera "$CAMERA" --out /work/outputs --delay "${DELAY:-5}" "$@"
   if is_wsl && [ -f "$OUT/screen.jpg" ]; then explorer.exe "$(wslpath -w "$OUT/screen.jpg")" || true
   else say "Straightened screen: $OUT/screen.jpg"; fi
+}
+
+cmd_tip-test() {
+  local cams="${1:-}"
+  [ -z "$cams" ] && { cams="${CAMERA:-}"; [ -n "${CAMERA2:-}" ] && cams="${cams:+$cams,}$CAMERA2"; }
+  run_hw python /repo/touch/tipvision.py --cameras "$cams" --color "${TIP_COLOR:-pink}" --out /work/outputs
 }
 
 cmd_cam-test() {
@@ -291,6 +307,7 @@ Touch screen
   fit [--reset]             Refit (or remove) the aim correction from all test logs
   see                       Camera -> straightened screenshot in outputs/screen.jpg
   cam-test [CAMERA]         Test a camera (USB or phone): resolution, speed, markers found
+  tip-test [CAM1,CAM2]      Tip vision check: sticker found?, viewing angles, can the pair measure height?
 
   shell                     Open a shell inside the container
 EOF
@@ -298,7 +315,7 @@ EOF
 
 c="${1:-help}"; shift || true
 case "$c" in
-  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice|cam-test)
+  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice|cam-test|tip-test)
     "cmd_$c" "$@" ;;
   *) cmd_help; exit 1 ;;
 esac

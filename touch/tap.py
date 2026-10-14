@@ -24,8 +24,10 @@ from common import (ForceGuard, countdown, ScreenModel, connect_follower, follow
 class Tapper:
     def __init__(self, port, robot_id="my_follower", robot_type="so101",
                  lift=0.3, press=0.04, speed=1.0, via_home=True, smooth=0.08, own_path=True, correct=True, dwell=0.25,
-                 max_load=200, torque=100, learned=True):
+                 max_load=0, torque=100, learned=True, vision=None, hover=0.15, vision_gain=0.8):
         """
+        vision: a TipVision (0, 1 or 2 cameras); hover-check before each tap when it has learned enough
+        hover: how high to hover for the check (fraction of the way from the touch pose to home)
         max_load: force guard, how much the motor load may jump on contact (0..1000, 0 = off)
         torque: cap on shoulder/elbow/wrist strength in percent (100 = normal)
         dwell: seconds the stylus stays on the screen (longer = more reliable touches)
@@ -53,6 +55,8 @@ class Tapper:
         self.correction = Correction(calib) if correct else Correction({"points": []})
         self.last_command = None
         self.last_touch_q = None
+        self.vision, self.hover_frac, self.vision_gain = vision, hover, vision_gain
+        self.last_hover_obs, self.last_vision = None, None
         self.dwell = dwell
         self.last_settle_err = None
         self.last_force_stop, self.last_peak_load, self.last_stop = False, 0.0, None
@@ -108,12 +112,26 @@ class Tapper:
         self.last_touch_q = touch
         g = self.guard
         g.peak = 0.0
-        # gentle final approach; stops the moment the screen reports the touch (or on too much force)
-        why = follow_path(self.robot, down, 1.3 * t_down / self.speed, slow_end=0.25, guard=g, guard_from=0.6)
+        self.last_hover_obs, self.last_vision = None, None
+        if self.vision is not None and self.vision.enabled:
+            # most of your path, then hover just above the target, look, correct, then straight down
+            k = int(0.75 * (len(down) - 1))
+            why = follow_path(self.robot, down[:k + 1], 0.75 * t_down / self.speed, guard=g, guard_from=1.1)
+            if not why:
+                touch, why = self._hover_check(u, v, touch)
+            if not why:
+                hover = touch + (self.model.home - touch) * self.hover_frac
+                why = follow_path(self.robot, np.array([hover, touch]), 0.8 / self.speed, guard=g, guard_from=0.3)
+            approach_dir = touch - (touch + (self.model.home - touch) * self.hover_frac)
+            self.last_touch_q = touch
+        else:
+            # gentle final approach; stops the moment the screen reports the touch (or on too much force)
+            why = follow_path(self.robot, down, 1.3 * t_down / self.speed, slow_end=0.25, guard=g, guard_from=0.6)
+            approach_dir = (touch - down[-8]) * 4
         self.last_settle_err = None
         if not why:
             # not touched yet: push a little further, and make sure the stylus really arrives
-            pressed = touch + (touch - down[-8]) * self.press * 4
+            pressed = touch + approach_dir * self.press
             why = follow_path(self.robot, np.array([touch, pressed]), 0.15, guard=g, guard_from=0.0,
                               reset_guard=False)
             if not why:
@@ -125,6 +143,34 @@ class Tapper:
         # lift off from wherever the stylus actually is (never re-push to the taught pose)
         follow_path(self.robot, up, t_up / self.speed, start=read_joints(self.robot))
         self.at_home = True
+
+    def _jacobian(self, u, v, h=0.01):
+        tp = self.model.touch_pose
+        return np.stack([(tp(u + h, v) - tp(u - h, v)) / (2 * h), (tp(u, v + h) - tp(u, v - h)) / (2 * h)], 1)
+
+    def _hover_check(self, u, v, touch, iters=2, tol=0.004):
+        """Hover above the target, see where the tip would land, correct the joint pose.
+        Only corrects once the vision model has learned enough; always records what it saw."""
+        J = self._jacobian(u, v)
+        why = None
+        for it in range(iters + 1):
+            hover = touch + (self.model.home - touch) * self.hover_frac
+            move_to(self.robot, hover, 0.4 / self.speed)
+            why = settle(self.robot, hover, timeout=0.6, guard=self.guard)[1]
+            if why:
+                break
+            time.sleep(0.15)  # let the arm stop shaking before the picture
+            obs = self.vision.observe()
+            est = self.vision.estimate(obs)
+            self.last_hover_obs, self.last_vision = obs, est
+            if not (self.vision.ready and est["landing"] is not None) or it == iters:
+                break
+            err = np.array(est["landing"]) - [u, v]
+            if np.hypot(*err) < tol:
+                break
+            touch = touch + self.vision_gain * (J @ -err)  # aim the joints so the tip lands on target
+            touch[-1] = self.model.home[-1]
+        return touch, why
 
     def stop_on_touch(self, server):
         """While a TouchServer is running (tests, practice), stop pressing as soon as it reports a touch."""
@@ -177,10 +223,13 @@ if __name__ == "__main__":
     p.add_argument("--no-home", action="store_true", help="don't return home between taps (faster)")
     p.add_argument("--smooth", type=float, default=0.08, help="path smoothing in seconds (0 = raw)")
     p.add_argument("--simple-path", action="store_true", help="ignore your recorded paths")
-    p.add_argument("--max-load", type=int, default=200,
+    p.add_argument("--max-load", type=int, default=0,
                    help="force guard: stop pushing when motor load jumps this much (0..1000, 0 = off)")
     p.add_argument("--torque", type=int, default=100, help="cap arm strength in percent while tapping")
     p.add_argument("--dwell", type=float, default=0.25, help="seconds the stylus stays on the screen")
+    p.add_argument("--cameras", default="", help="tip vision cameras: 'none', one, or two comma-separated")
+    p.add_argument("--tip-color", default="pink")
+    p.add_argument("--no-vision", action="store_true", help="tap without the camera hover-check")
     p.add_argument("--no-learned", action="store_true", help="ignore the learned model (use calibration only)")
     p.add_argument("--no-correct", action="store_true", help="don't apply the learned aim correction")
     p.add_argument("--no-learn", action="store_true", help="don't update the correction after a test")
@@ -211,9 +260,17 @@ if __name__ == "__main__":
         countdown(a.delay, "switch to the page on the touch screen (reload it, full-screen F11)")
 
     results = []
+    vision = None
+    if a.cameras and not a.no_vision:
+        from correction import calib_id as _cid
+        from tipvision import TipVision
+        vision = TipVision(a.cameras, a.tip_color, cid=_cid(load_calib()))
     with Tapper(a.port, a.id, a.robot, a.lift, a.press, a.speed, via_home=not a.no_home,
                 smooth=a.smooth, own_path=not a.simple_path, correct=not a.no_correct,
-                dwell=a.dwell, max_load=a.max_load, torque=a.torque, learned=not a.no_learned) as t:
+                dwell=a.dwell, max_load=a.max_load, torque=a.torque, learned=not a.no_learned,
+                vision=vision) as t:
+        if vision is not None:
+            print(vision.describe())
         print("force guard: " + (f"on (stops at a load jump of {a.max_load})" if t.guard.ok else "OFF"))
         if srv:
             t.stop_on_touch(srv)
@@ -241,7 +298,10 @@ if __name__ == "__main__":
                 got = srv.all_touches()
                 r = {"target": [u, v], "command": list(t.last_command), "touches": got,
                      "settle_err_deg": t.last_settle_err, "force_stop": t.last_force_stop,
-                     "peak_load_jump": t.last_peak_load, "stopped_by": t.last_stop}
+                     "peak_load_jump": t.last_peak_load, "stopped_by": t.last_stop,
+                     "vision": t.last_vision, "hover_obs": t.last_hover_obs}
+                if got and not a.no_learn and t.vision is not None and t.last_hover_obs:
+                    t.vision.learn(t.last_hover_obs, (got[0]["u"], got[0]["v"]))
                 if got and not a.no_learn and t.last_touch_q is not None:
                     t.exp.add(t.last_touch_q, (got[0]["u"], got[0]["v"]), (u, v), None, t.press, {"source": "test"})
                 if got:
@@ -264,6 +324,10 @@ if __name__ == "__main__":
                 results.append(r)
             if t.last_force_stop:
                 line += "  [force guard stopped the push]"
+            if t.last_vision and t.last_vision.get("landing"):
+                lv = t.last_vision
+                line += (f"  [cams: predicted ({lv['landing'][0]:.3f},{lv['landing'][1]:.3f})"
+                         + (f", height {lv['height']:.2f}" if lv.get("height") is not None else "") + "]")
             print(line, flush=True)
 
     if srv:
@@ -284,6 +348,9 @@ if __name__ == "__main__":
         print(f"Log saved: {log}")
         if not a.no_learn:
             t.exp.save()
+            if t.vision is not None and t.vision.enabled:
+                t.vision.save()
+                print(t.vision.describe())
             print(f"\nSaved {len(t.exp)} touches of experience for the learned model.")
             if not t.learned:
                 print("== Updating aim correction from all tests with this calibration ==")

@@ -26,7 +26,7 @@ p.add_argument("--leader-id", default="my_leader")
 p.add_argument("--robot", default="so101")
 p.add_argument("--grid", type=int, default=3, help="dots per side")
 p.add_argument("--http-port", type=int, default=8765)
-p.add_argument("--max-load", type=int, default=250,
+p.add_argument("--max-load", type=int, default=0,
                help="force guard: follower stops pushing when motor load jumps this much (0 = off)")
 p.add_argument("--free-wrist", action="store_true",
                help="don't lock the wrist after home (not recommended: inconsistent wrist angles ruin in-between taps)")

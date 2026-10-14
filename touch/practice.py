@@ -27,8 +27,10 @@ p.add_argument("--targets", type=int, default=30, help="how many targets to prac
 p.add_argument("--tol", type=float, default=15, help="good enough = within this many pixels")
 p.add_argument("--tries", type=int, default=5, help="max attempts per target")
 p.add_argument("--speed", type=float, default=1.0)
-p.add_argument("--max-load", type=int, default=200)
+p.add_argument("--max-load", type=int, default=0, help="force guard (0 = off)")
 p.add_argument("--http-port", type=int, default=8765)
+p.add_argument("--cameras", default="", help="tip vision cameras: 'none', one, or two comma-separated")
+p.add_argument("--tip-color", default="pink")
 p.add_argument("--delay", type=float, default=5, help="seconds to switch to the page before starting")
 a = p.parse_args()
 
@@ -43,7 +45,14 @@ srv = TouchServer(a.http_port, mode="test", msg="Practice: the robot is teaching
 countdown(a.delay, "switch to the page on the touch screen (full-screen, F11)")
 
 results = []
-with Tapper(a.port, a.id, a.robot, speed=a.speed, max_load=a.max_load, correct=False, learned=False) as t:
+vision = None
+if a.cameras:
+    from tipvision import TipVision
+    vision = TipVision(a.cameras, a.tip_color, cid=calib_id(calib))
+with Tapper(a.port, a.id, a.robot, speed=a.speed, max_load=a.max_load, correct=False, learned=False,
+            vision=vision) as t:
+    if vision is not None:
+        print(vision.describe())
     t.stop_on_touch(srv)  # stop pressing the moment the page reports the touch
     exp = t.exp
     bandit = PressBandit(exp)
@@ -73,6 +82,8 @@ print(f"press depth rewards: {bandit.describe()}  -> best {bandit.best()}")
 log = save_log("practice", {"calib_id": calib_id(calib), "settings": vars(a), "results": results,
                             "bandit": exp.data.get("bandit")})
 print(f"Experience: {len(exp)} touches saved. Log: {log}")
+if vision is not None:
+    print(vision.describe())
 srv.set(target=None, msg=f"Practice done: {hits}/{len(results)} targets within {a.tol:.0f}px")
 time.sleep(1.5)
 srv.stop()

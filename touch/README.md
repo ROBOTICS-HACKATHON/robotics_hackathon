@@ -60,11 +60,34 @@ starts a fresh correction automatically.
 **Logs:** every calibration and test run is saved to `touch/logs/` (`calib_<time>.json`, `test_<time>.json`)
 with all touches, so you can compare runs (e.g. different `--smooth` or `--speed`).
 
+## Camera hover-check (0, 1 or 2 cameras)
+
+Put a small bright **sticker near the stylus tip** (pink by default; green/orange/blue also work) where the
+cameras can see it. Then in `lr.conf`:
+
+```bash
+CAMERA=/dev/video4            # first camera (best: from above / straight on)
+CAMERA2=ipwebcam:192.168.1.23 # optional second camera (best: lower, flatter, from the front)
+VISION=auto                   # off = tap without cameras (default)
+TIP_COLOR=pink
+```
+
+`./lr tip-test` checks the setup: markers, sticker found, each camera's viewing angle, and whether the
+pair is different enough to measure height (aim for 25 deg or more between them).
+
+Before each tap the arm hovers just above the target, the cameras see where the tip points, and the arm
+corrects its aim, so the **first tap lands right** (important for the real CAPTCHA, where you can't retry).
+Each camera's viewing-angle shift is learned from measured taps (`tap --test/--random`, `practice`); until
+5 are learned it only watches. With 2 cameras it also estimates the tip's height (1 = normal hover) and
+doesn't care if the hover height varies. Simulated with a front-low + top pair: landing predicted to
+~1-3 px (2 cams) vs ~3-7 px (top cam alone) vs ~18 px (front-low cam alone). `--no-vision` taps without it.
+
 ## Protecting the screen
 
 - **Stop on touch (tests and practice):** the page reports a touch the instant the glass registers it, and the
   arm stops pressing right then and lifts off. No pushing after contact.
-- **Force guard (on by default, also when no page is reporting, e.g. the real CAPTCHA):** the motors report how hard they work. When the stylus pushes into the
+- **Force guard (OFF by default: it misread normal arm movement as pushing; enable with `--max-load 300`
+  only after checking `peak_load_jump` in the test logs):** the motors report how hard they work. When the stylus pushes into the
   glass that load jumps, and the arm immediately stops pushing and lifts off. During calibration the
   follower stops following the leader deeper ("too much force" message). Tune with `--max-load`
   (lower = gentler, default 200 for taps; `0` turns it off). Test logs record `peak_load_jump` for each tap,
