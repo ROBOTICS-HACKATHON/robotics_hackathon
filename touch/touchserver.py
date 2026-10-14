@@ -20,6 +20,7 @@ LOG_DIR = HERE / "logs"
 class TouchServer:
     def __init__(self, port=8765, **state):
         self.touches = queue.Queue()  # dicts: u, v, w, h (frame size in px), t
+        self.touched = threading.Event()  # set the moment any touch arrives (used to stop pressing)
         self.state = {"step": 0, "msg": "Starting...", "mode": "calib", **state}
         srv = self
 
@@ -50,6 +51,7 @@ class TouchServer:
                 d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
                 srv.touches.put({"u": float(d["u"]), "v": float(d["v"]),
                                  "w": d.get("w"), "h": d.get("h"), "t": time.time()})
+                srv.touched.set()
                 self._send(200, b"{}")
 
         self.httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)
@@ -61,6 +63,7 @@ class TouchServer:
         self.state.update(kw)
 
     def drain(self):
+        self.touched.clear()
         while not self.touches.empty():
             self.touches.get_nowait()
 

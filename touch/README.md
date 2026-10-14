@@ -16,7 +16,10 @@ Positions on the screen are always **u, v from 0 to 1**: u goes left to right, v
    ./lr touch-calib
    ```
    On the touch screen, open the address it prints (`http://localhost:8765/` when the touch screen is plugged into this computer) full-screen (F11).
-   - Hold the stylus a few cm **above** the middle of the screen with the leader arm (home), press Enter.
+   - Hold the stylus a few cm **above** the middle of the screen with the leader arm (home), wrist angled so the
+     stylus points down at the screen, press Enter. **The wrist is then locked** at that angle: steer each target
+     with only the base, shoulder and elbow. (A different wrist angle per target is what made taps between
+     targets miss up/down.)
    - For each **highlighted target**: move down and touch it, then lift straight up back to home and **hold still** for a moment. The next target lights up by itself.
    - Your whole movement is recorded. Taps later replay a **smoothed** version of your own path, so move the way you want the robot to move: up and over, never sliding on the glass.
    - Touches outside the highlighted target are ignored.
@@ -29,7 +32,21 @@ Positions on the screen are always **u, v from 0 to 1**: u goes left to right, v
    mean and worst error in pixels, how many taps landed within 25 and 50 px, and the average miss direction.
    If most of the error is in one direction, the misses are systematic: recalibrate. If it's scattered, it's noise.
 
-**Self-correcting aim:** after every measured test, the robot learns its systematic miss (shift, stretch,
+**Practice (the robot teaches itself):**
+
+```bash
+./lr practice --targets 40 --tol 15    # ~5-10 min; run it a few times
+```
+
+For each target it taps, sees where it landed, corrects its **joint pose** and retries until it is within
+`--tol` pixels, then moves on. Every touch becomes experience (`touch/experience.json`, per calibration):
+the arm's model of "which joint angles hit (u, v)" is refit from all of it, with nearby examples weighted most,
+so **first tries keep getting better**. Each attempt also gets a reward (accuracy, minus penalties for no
+touch, double touches or force stops) that tunes how deep it presses. The report shows the learning curve.
+After practice, `./lr tap` and the agent automatically use the learned model (`--no-learned` to compare).
+Don't retry on a real CAPTCHA (a second tap toggles the tile back): practise on the test page, then demo.
+
+**Self-correcting aim (simpler, used until there's experience):** after every measured test, the robot learns its systematic miss (shift, stretch,
 bend) from all tests made with the current calibration, and aims slightly off to cancel it. Just repeat
 `./lr tap --random 20` a couple of times; each run prints the expected miss before and after correction.
 `./lr fit` refits by hand, `./lr fit --reset` removes it, `--no-correct` taps without it. Recalibrating
@@ -37,6 +54,20 @@ starts a fresh correction automatically.
 
 **Logs:** every calibration and test run is saved to `touch/logs/` (`calib_<time>.json`, `test_<time>.json`)
 with all touches, so you can compare runs (e.g. different `--smooth` or `--speed`).
+
+## Protecting the screen
+
+- **Stop on touch (tests and practice):** the page reports a touch the instant the glass registers it, and the
+  arm stops pressing right then and lifts off. No pushing after contact.
+- **Force guard (on by default, also when no page is reporting, e.g. the real CAPTCHA):** the motors report how hard they work. When the stylus pushes into the
+  glass that load jumps, and the arm immediately stops pushing and lifts off. During calibration the
+  follower stops following the leader deeper ("too much force" message). Tune with `--max-load`
+  (lower = gentler, default 200 for taps; `0` turns it off). Test logs record `peak_load_jump` for each tap,
+  so you can see how hard real taps push.
+- **Optional strength cap:** `./lr tap --torque 60 ...` limits shoulder/elbow/wrist to 60% while tapping.
+  Too low and the arm can't hold itself up: lower it step by step and watch.
+- **Mechanical (the most reliable):** mount the stylus so it can slide back a little in the gripper
+  (foam, a rubber band, or a spring behind it) and use a soft rubber-tipped stylus. Add a screen protector.
 
 ## Your CAPTCHA page
 
@@ -79,7 +110,7 @@ The arm covers the screen while tapping, so call `see` **before** tapping, with 
 
 | Problem | Fix |
 |---|---|
-| Taps don't register | `./lr tap --press 0.08 ...` pushes deeper; check the stylus tip touches flat |
+| Taps don't register | The test output says why: "stopped short" = blocked or weak; "reached its pose" = press deeper with `--press 0.08`; "force guard stopped it" = `--max-load 300`. Also try `--dwell 0.4` |
 | Taps miss by a bit everywhere | Redo `touch-calib` and touch the dot centres more carefully |
 | Taps miss more near the edges | `touch-calib` with a 4×4 grid: open `calib.html?grid=4`, add `--grid 4` in `lr` |
 | Too slow / too jerky | `--speed 1.5` or `--speed 0.7` |

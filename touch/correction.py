@@ -23,7 +23,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 CORR_FILE = HERE / "screen_correction.json"
 LOG_DIR = HERE / "logs"
-OUTLIER = 0.08  # misses larger than 8% of the screen are treated as bad touches (palm, bounce)
+OUTLIER = 0.25  # misses larger than 25% of the screen are treated as bad touches (palm, bounce)
 
 
 def calib_id(calib):

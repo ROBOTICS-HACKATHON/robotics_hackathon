@@ -224,6 +224,11 @@ cmd_touch-calib() {
     --follower-id "$FOLLOWER_ID" --leader-id "$LEADER_ID" --robot "$ROBOT"
 }
 
+cmd_practice() {
+  # shellcheck disable=SC2046
+  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/practice.py $(ARM_ARGS) "$@"
+}
+
 cmd_fit() {
   run_hw bash -c "cd /repo/touch && python correction.py $*"
 }
@@ -277,6 +282,7 @@ Touch screen
   set-home                  Re-set only the home pose the arm returns to between taps
   tap u v [u v ...]         Tap screen points (0..1). --home parks the arm
   tap --test | --random N   Tap the targets / N random points, MEASURE, and update the aim correction
+  practice [--targets N]    Robot teaches itself: retries each target until accurate, learns from every touch
   fit [--reset]             Refit (or remove) the aim correction from all test logs
   see                       Camera -> straightened screenshot in outputs/screen.jpg
 
@@ -286,7 +292,7 @@ EOF
 
 c="${1:-help}"; shift || true
 case "$c" in
-  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit)
+  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice)
     "cmd_$c" "$@" ;;
   *) cmd_help; exit 1 ;;
 esac

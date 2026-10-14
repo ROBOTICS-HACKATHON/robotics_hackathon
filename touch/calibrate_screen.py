@@ -15,7 +15,7 @@ import time
 
 import numpy as np
 
-from common import CALIB_FILE, JOINTS, connect_follower, connect_leader
+from common import CALIB_FILE, JOINTS, ForceGuard, connect_follower, connect_leader, read_joints
 from touchserver import TouchServer, save_log
 
 p = argparse.ArgumentParser()
@@ -26,6 +26,10 @@ p.add_argument("--leader-id", default="my_leader")
 p.add_argument("--robot", default="so101")
 p.add_argument("--grid", type=int, default=3, help="dots per side")
 p.add_argument("--http-port", type=int, default=8765)
+p.add_argument("--max-load", type=int, default=250,
+               help="force guard: follower stops pushing when motor load jumps this much (0 = off)")
+p.add_argument("--free-wrist", action="store_true",
+               help="don't lock the wrist after home (not recommended: inconsistent wrist angles ruin in-between taps)")
 args = p.parse_args()
 
 fr = np.linspace(0.15, 0.85, args.grid)
@@ -64,9 +68,23 @@ def pose(cmd):
     return np.array([cmd[f"{j}.pos"] for j in JOINTS], dtype=float)
 
 
+LOCKED = {}  # joint -> fixed value, set after HOME
+guard = ForceGuard(robot, limit=args.max_load, lag_s=1.0)
+hold_until = 0.0
+
+
 def mirror_once(path):
+    global hold_until
     cmd = leader.get_action()
-    robot.send_action(cmd)  # follower mirrors the leader
+    cmd.update(LOCKED)  # wrist held at its home angle, so every target is reached the same way
+    if time.monotonic() < hold_until or guard.check():
+        # pushing too hard on the screen: the follower holds still instead of following deeper
+        if time.monotonic() >= hold_until:
+            print("    !! too much force on the screen: follower stopped. Lift the leader a little.", flush=True)
+            hold_until = time.monotonic() + 0.4
+        robot.send_action({f"{j}.pos": float(x) for j, x in zip(JOINTS, read_joints(robot))})
+    else:
+        robot.send_action(cmd)  # follower mirrors the leader
     q = pose(cmd)
     if path is not None:
         path.append([round(time.monotonic(), 3)] + q.round(3).tolist())
@@ -112,7 +130,13 @@ def record_return(step, home, touch, path, still=1.5, still_s=0.4):
 
 
 try:
-    home, _ = wait_step(0, "HOME: hold the stylus a few cm ABOVE the middle of the screen", use_touch=False)
+    home, _ = wait_step(0, "HOME: hold the stylus a few cm ABOVE the middle of the screen, "
+                           "wrist angled so the stylus points down at the screen", use_touch=False)
+    if not args.free_wrist:
+        LOCKED.update({"wrist_flex.pos": float(home[3]), "wrist_roll.pos": float(home[4]),
+                       "gripper.pos": float(home[5])})
+        print("    WRIST LOCKED at its home angle: steer only with base, shoulder and elbow.\n"
+              "    (moving the leader's wrist or trigger does nothing now)", flush=True)
     points = []
     for i, (u, v) in enumerate(targets, 1):
         approach, retreat = [], []
@@ -128,7 +152,7 @@ try:
                        "target": target_uv, "touched": bool(landed), "frame_px": frame_px})
         print(f"    recorded path: down {approach[-1][0] - approach[0][0]:.1f}s, "
               f"up {retreat[-1][0] - retreat[0][0]:.1f}s")
-    calib = {"home": home.tolist(), "points": points}
+    calib = {"home": home.tolist(), "points": points, "wrist_locked": not args.free_wrist}
     CALIB_FILE.write_text(json.dumps(calib))
     log = save_log("calib", calib)
     print(f"Session log: {log}")
