@@ -11,6 +11,13 @@ mise run dev
 
 Open http://localhost:4321. Build with `mise run build`.
 
+The four corner ArUco markers reuse `touch/markers/aruco_0.png` through `aruco_3.png`
+from the arm's click-test page. They stay sharp above open challenge dialogs, use
+the same 18 CSS pixel inset, and do not intercept clicks. Marker IDs are 0 at
+top-left, 1 at top-right, 2 at bottom-right, and 3 at bottom-left. Use fullscreen
+with the same screen and arm placement as `./lr touch-calib`; `./lr see` then
+straightens the rectangle between their outer corners for calibrated `(u, v)` taps.
+
 Choose one of 400 photo puzzles (200 image grids and 200 sliders), or the checkbox-only
 Turnstile mock. Then click the verification checkbox. The challenge
 opens over a blurred page. "Open fullscreen" uses browser fullscreen when available.

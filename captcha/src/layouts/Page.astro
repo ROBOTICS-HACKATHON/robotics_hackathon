@@ -1,5 +1,6 @@
 ---
 import '../styles/global.css';
+import ScreenMarkers from '../components/ScreenMarkers.astro';
 interface Props { title: string }
 const { title } = Astro.props;
 ---
@@ -17,5 +18,5 @@ const { title } = Astro.props;
       }
     </script>
   </head>
-  <body><slot /></body>
+  <body><slot /><ScreenMarkers /></body>
 </html>

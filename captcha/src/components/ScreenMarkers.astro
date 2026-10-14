@@ -1,0 +1,55 @@
+---
+import topLeft from '../../../touch/markers/aruco_0.png';
+import topRight from '../../../touch/markers/aruco_1.png';
+import bottomRight from '../../../touch/markers/aruco_2.png';
+import bottomLeft from '../../../touch/markers/aruco_3.png';
+const markers = [topLeft, topRight, bottomRight, bottomLeft];
+---
+
+<div id="screen-markers" popover="manual" aria-hidden="true" data-screen-frame="aruco-outer">
+  {markers.map((marker, id) => (
+    <img src={marker.src} data-marker-id={id} alt="" width="240" height="240" draggable="false" />
+  ))}
+</div>
+
+<script>
+  const markers = document.querySelector<HTMLElement>('#screen-markers');
+  if (markers) {
+    function showMarkers() {
+      if (!markers) return;
+      // Reinsert above modal dialogs so their blurred backdrop cannot cover the markers.
+      if (markers.matches(':popover-open')) markers.hidePopover();
+      markers.showPopover();
+    }
+    showMarkers();
+    const observer = new MutationObserver(showMarkers);
+    document.querySelectorAll('dialog').forEach((dialog) => {
+      observer.observe(dialog, { attributes: true, attributeFilter: ['open'] });
+    });
+    document.addEventListener('fullscreenchange', showMarkers);
+  }
+</script>
+
+<style>
+  #screen-markers {
+    position: fixed;
+    inset: 0;
+    width: auto;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    pointer-events: none;
+  }
+  img {
+    position: absolute;
+    width: min(14vmin, 160px);
+    height: min(14vmin, 160px);
+    image-rendering: pixelated;
+  }
+  [data-marker-id='0'] { top: 18px; left: 18px; }
+  [data-marker-id='1'] { top: 18px; right: 18px; }
+  [data-marker-id='2'] { bottom: 18px; right: 18px; }
+  [data-marker-id='3'] { bottom: 18px; left: 18px; }
+</style>
