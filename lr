@@ -238,6 +238,11 @@ cmd_practice() {
     --cameras "$(VISION_CAMS)" --tip-color "${TIP_COLOR:-pink}" "$@"
 }
 
+cmd_heatmap() {
+  run_hw bash -c "cd /repo/touch && python learner.py --heatmap /work/outputs/heatmap.png $*"
+  if is_wsl && [ -f "$OUT/heatmap.png" ]; then explorer.exe "$(wslpath -w "$OUT/heatmap.png")" || true; fi
+}
+
 cmd_fit() {
   run_hw bash -c "cd /repo/touch && python correction.py $*"
 }
@@ -304,6 +309,7 @@ Touch screen
   tap u v [u v ...]         Tap screen points (0..1). --home parks the arm
   tap --test | --random N   Tap the targets / N random points, MEASURE, and update the aim correction
   practice [--targets N]    Robot teaches itself: retries each target until accurate, learns from every touch
+  heatmap                   Accuracy per screen zone (9 zones) + the best press/speed each zone learned
   fit [--reset]             Refit (or remove) the aim correction from all test logs
   see                       Camera -> straightened screenshot in outputs/screen.jpg
   cam-test [CAMERA]         Test a camera (USB or phone): resolution, speed, markers found
@@ -315,7 +321,7 @@ EOF
 
 c="${1:-help}"; shift || true
 case "$c" in
-  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice|cam-test|tip-test)
+  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|tap|see|fit|practice|cam-test|tip-test|heatmap)
     "cmd_$c" "$@" ;;
   *) cmd_help; exit 1 ;;
 esac

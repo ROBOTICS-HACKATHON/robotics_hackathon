@@ -51,6 +51,11 @@ touch, double touches or force stops) that tunes how deep it presses. The report
 After practice, `./lr tap` and the agent automatically use the learned model (`--no-learned` to compare).
 Don't retry on a real CAPTCHA (a second tap toggles the tile back): practise on the test page, then demo.
 
+**Per-zone learning + heatmap:** the screen is split into 9 zones, one per calibration target. Each zone keeps
+its own statistics and learns its own best press depth and approach speed from the rewards (zones differ:
+some strain the servos more). Practice spends more time on the hard zones. `./lr heatmap` (also shown after
+each practice) draws accuracy per zone; `./lr tap` and the agent then use each zone's best settings.
+
 **Self-correcting aim (simpler, used until there's experience):** after every measured test, the robot learns its systematic miss (shift, stretch,
 bend) from all tests made with the current calibration, and aims slightly off to cancel it. Just repeat
 `./lr tap --random 20` a couple of times; each run prints the expected miss before and after correction.

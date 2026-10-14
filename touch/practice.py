@@ -10,12 +10,13 @@ the session goes on. A reward per attempt also tunes how deep it presses.
 
 import argparse
 import time
+from pathlib import Path
 
 import numpy as np
 
 from common import countdown, load_calib
 from correction import calib_id
-from learner import LearnedModel, PressBandit, refine
+from learner import LearnedModel, ZoneBandit, draw_heatmap, refine, zone_centers, zone_of, zone_report, zone_weights
 from tap import Tapper
 from touchserver import TouchServer, save_log
 
@@ -39,7 +40,7 @@ cal = calib["points"]
 lo = [min(q["u"] for q in cal), min(q["v"] for q in cal)]
 hi = [max(q["u"] for q in cal), max(q["v"] for q in cal)]
 rng = np.random.default_rng()
-targets = rng.uniform(lo, hi, size=(a.targets, 2)).round(3)
+centers = zone_centers(calib)
 
 srv = TouchServer(a.http_port, mode="test", msg="Practice: the robot is teaching itself")
 countdown(a.delay, "switch to the page on the touch screen (full-screen, F11)")
@@ -55,12 +56,23 @@ with Tapper(a.port, a.id, a.robot, speed=a.speed, max_load=a.max_load, correct=F
         print(vision.describe())
     t.stop_on_touch(srv)  # stop pressing the moment the page reports the touch
     exp = t.exp
-    bandit = PressBandit(exp)
+    bandit = ZoneBandit(exp, centers)
     print(f"Starting with {len(exp)} touches of past experience for this calibration.")
+    # practise hard zones more: pick a zone by difficulty, then a random spot inside it
+    weights = zone_weights(zone_report(exp, centers, a.tol))
+    print("practice share per zone: " + ", ".join(f"{z}:{100 * w:.0f}%" for z, w in weights.items()))
+    zones = rng.choice(list(weights), size=a.targets, p=list(weights.values()))
+    targets = []
+    for z in zones:
+        for _ in range(500):
+            uv = rng.uniform(lo, hi).round(3)
+            if zone_of(*uv, centers) == z:
+                break
+        targets.append(uv)
     for i, (u, v) in enumerate(targets, 1):
         model = LearnedModel(calib, exp)  # refit from everything learned so far
         t.model.touch_pose = model.touch_pose
-        print(f"\ntarget {i}/{len(targets)}  ({u:.3f}, {v:.3f})")
+        print(f"\ntarget {i}/{len(targets)}  ({u:.3f}, {v:.3f})  zone {zone_of(u, v, centers)}")
         att = refine(t, srv, model, exp, bandit, (u, v), a.tol, a.tries, rng)
         ok = att[-1]["err_px"] is not None and att[-1]["err_px"] <= a.tol
         results.append({"target": [float(u), float(v)], "attempts": att, "success": ok})
@@ -78,9 +90,13 @@ for s in range(0, len(results), 10):
           + f", avg tries {np.mean(tries[s:s + 10]):.1f}" + (f", {nt} first-try no-touch" if nt else ""))
 hits = sum(r["success"] for r in results)
 print(f"reached {a.tol:.0f}px on {hits}/{len(results)} targets, {np.mean(tries):.1f} tries on average")
-print(f"press depth rewards: {bandit.describe()}  -> best {bandit.best()}")
+print("\n== Per zone (all practice so far with this calibration) ==")
+hm = Path(__file__).resolve().parent.parent / "outputs" / "heatmap.png"
+print(draw_heatmap(zone_report(exp, centers, a.tol), bandit, hm))
 log = save_log("practice", {"calib_id": calib_id(calib), "settings": vars(a), "results": results,
-                            "bandit": exp.data.get("bandit")})
+                            "zones": exp.data.get("zones"), "zone_report": zone_report(exp, centers, a.tol)})
+draw_heatmap(zone_report(exp, centers, a.tol), bandit, str(log).replace(".json", "_heatmap.png"))
+print(f"Heatmap: {hm}")
 print(f"Experience: {len(exp)} touches saved. Log: {log}")
 if vision is not None:
     print(vision.describe())

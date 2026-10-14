@@ -43,7 +43,7 @@ class Tapper:
         self.model = ScreenModel(calib, smooth_s=smooth)
         self.own_path = own_path and self.model.has_paths
         from correction import Correction, calib_id
-        from learner import Experience, LearnedModel, PressBandit
+        from learner import Experience, LearnedModel, ZoneBandit, zone_centers
         self.exp = Experience(calib_id(calib))
         self.learned = None
         if learned and len(self.exp) >= 5 and self.own_path:
@@ -51,7 +51,8 @@ class Tapper:
             self.learned = LearnedModel(calib, self.exp)
             self.model.touch_pose = self.learned.touch_pose
             correct = False
-            press = PressBandit(self.exp).best()
+        self.zones = (ZoneBandit(self.exp, zone_centers(calib))
+                      if learned and self.exp.data.get("zones") else None)
         self.correction = Correction(calib) if correct else Correction({"points": []})
         self.last_command = None
         self.last_touch_q = None
@@ -61,6 +62,7 @@ class Tapper:
         self.last_settle_err = None
         self.last_force_stop, self.last_peak_load, self.last_stop = False, 0.0, None
         self.lift, self.press, self.speed, self.via_home = lift, press, speed, via_home
+        self.base_speed = speed
         self.robot = connect_follower(port, robot_id, robot_type)
         self.at_home = False
         self.guard = ForceGuard(self.robot, limit=max_load)
@@ -85,6 +87,9 @@ class Tapper:
     def tap(self, u, v):
         if not (0 <= u <= 1 and 0 <= v <= 1):
             raise ValueError(f"({u}, {v}) is outside the screen")
+        if self.zones is not None:  # per-zone settings learned from rewards in practice
+            self.press, slow = self.zones.best(self.zones.zone(u, v))
+            self.speed = self.base_speed * slow
         u, v = self.correction.aim(u, v)  # aim slightly off to cancel the learned miss
         self.last_command = (u, v)
         touch = self.model.touch_pose(u, v)
@@ -304,6 +309,15 @@ if __name__ == "__main__":
                     t.vision.learn(t.last_hover_obs, (got[0]["u"], got[0]["v"]))
                 if got and not a.no_learn and t.last_touch_q is not None:
                     t.exp.add(t.last_touch_q, (got[0]["u"], got[0]["v"]), (u, v), None, t.press, {"source": "test"})
+                if not a.no_learn:
+                    from learner import reward, zone_centers, zone_of
+                    _e = (np.hypot((got[0]["u"] - u) * (got[0].get("w") or 1000), (got[0]["v"] - v) * (got[0].get("h") or 1000))
+                          if got else None)
+                    t.exp.data.setdefault("attempts", []).append(
+                        {"zone": zone_of(u, v, zone_centers(load_calib())), "try": 1, "err_px": _e,
+                         "touched": bool(got), "press": t.press, "slow": t.speed / t.base_speed,
+                         "reward": reward(_e or 0, bool(got), len(got), t.last_force_stop, 15),
+                         "target": [u, v], "t": time.time(), "source": "test"})
                 if got:
                     g = got[0]
                     du, dv = g["u"] - u, g["v"] - v
