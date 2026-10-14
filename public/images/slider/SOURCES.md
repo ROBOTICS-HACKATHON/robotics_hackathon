@@ -1,8 +1,8 @@
 # Slider photograph sources
 
-100 slider puzzles use 60 distinct real photographs downloaded from the Pexels photo CDN and cropped to 960 × 600. Each geometry-and-photo combination is distinct. No generated artwork is used.
+200 slider puzzles use 60 distinct real photographs downloaded from the Pexels photo CDN and cropped to 960 × 600. Each geometry-and-photo combination is distinct. No generated artwork is used.
 
-The default split is puzzles 1–80 for training and 81–100 for held-out testing. Photos 1–50 are training-only; photos 51–60 are test-only. Some photos have multiple gap geometries within their own split. The original first ten puzzle geometries are unchanged.
+The default split is catalog positions 1–160 for training and 161–200 for held-out testing. Puzzle IDs remain stable and are independent of catalog position. Photos 1–50 are training-only; photos 51–60 are test-only. Some photos have multiple gap geometries within their own split. The original first ten puzzle geometries are unchanged.
 
 Credit: Pexels and the contributors linked on each source photo page. The [Pexels License](https://www.pexels.com/license/) governs these photos; the repository's code license does not cover them.
 

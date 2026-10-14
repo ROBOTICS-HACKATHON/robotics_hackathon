@@ -4,7 +4,7 @@ Real photographs downloaded from Pexels and visually checked at the saved 600 ×
 
 ## Training photos
 
-The nine photographs below and the nine animals in [../SOURCES.md](../SOURCES.md) form the training pool. The first 80 image challenges use only this pool.
+The nine photographs below and the nine animals in [../SOURCES.md](../SOURCES.md) form the training pool. The first 160 image challenges use only this pool.
 
 | Local file | Source photo |
 | --- | --- |
@@ -24,7 +24,7 @@ The grids also reuse the nine animal photographs documented in [../SOURCES.md](.
 
 ## Held-out test photos
 
-The final 20 image challenges use only these 18 different photographs. No source photo in this table is used by a training grid. Each saved crop was visually checked; unsuitable crops were replaced before defining the challenges. The split is attached to each challenge as `split: 'train' | 'test'`.
+The final 40 image challenges use only these 18 different photographs. No source photo in this table is used by a training grid. Each saved crop was visually checked; unsuitable crops were replaced before defining the challenges. The split is attached to each challenge as `split: 'train' | 'test'`.
 
 | Local file | Source photo |
 | --- | --- |
