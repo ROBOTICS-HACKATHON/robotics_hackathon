@@ -1,0 +1,2 @@
+# Copy to .dev.vars for `wrangler dev` ONLY. Never deploy with this set.
+ALLOW_UNAUTHENTICATED_DEV=true

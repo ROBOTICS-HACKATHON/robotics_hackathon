@@ -15,7 +15,13 @@ RETRY_STATUS = {429, 500, 502, 503, 504}
 
 
 class WorkersAIError(RuntimeError):
-    pass
+    """A failed Workers AI call. Keeps Cloudflare's own status and error list so callers can tell a bad
+    token from a missing licence from a used-up allowance (see `explain_error`)."""
+
+    def __init__(self, message: str, status: int | None = None, errors: list | None = None):
+        super().__init__(message)
+        self.status = status
+        self.errors = errors or []
 
 
 def describe_exc(e: BaseException, limit: int = 160) -> str:
@@ -69,7 +75,7 @@ class WorkersAI:
             break
         body = r.json()
         if r.status_code >= 400 or not body.get("success", False):
-            raise WorkersAIError(f"{model}: {r.status_code} {body.get('errors')}")
+            raise WorkersAIError(f"{model}: {r.status_code} {body.get('errors')}", r.status_code, body.get("errors"))
         if not body.get("result"):
             raise WorkersAIError(f"{model}: empty result, full response body: {r.text[:800]}")
         return body["result"]
@@ -201,3 +207,64 @@ async def vlm_query(ai: WorkersAI, image: bytes, question: str, *,
         payload = chat_payload(model, image, question, max_tokens=max_tokens,
                                temperature=temperature)
     return find_answer(await ai.run(model, json=payload))
+
+
+def explain_error(e: BaseException) -> tuple[str, str]:
+    """(kind, plain-English explanation) for a Workers AI failure.
+
+    kind: auth | forbidden | licence | quota | other. 401 and 403 are NOT the same thing: Cloudflare also
+    answers 403 for a model whose licence you have not accepted, and a used-up allowance is not a
+    credentials problem at all."""
+    status = getattr(e, "status", None)
+    errors = [x for x in (getattr(e, "errors", None) or []) if isinstance(x, dict)]
+    codes = {x.get("code") for x in errors}
+    said = "; ".join(str(x.get("message", "")) for x in errors) or str(e)
+    low = said.lower()
+    if 5016 in codes or "model agreement" in low:
+        return "licence", ("This model needs its licence accepted once on your Cloudflare account, or pick a model "
+                           f"that does not. Cloudflare says: {said[:300]}")
+    if status == 429 or "daily free allocation" in low or "neurons" in low:
+        return "quota", ("Cloudflare is rate limiting you or your Workers AI allowance is used up. This is not a "
+                         f"credentials problem; wait or raise the plan's limit. Cloudflare says: {said[:300]}")
+    if status == 401 or 10000 in codes or "authentication error" in low:
+        return "auth", "Cloudflare did not accept the API token for this account."
+    if status == 403:
+        return "forbidden", ("The token is recognised but not allowed to do this: it needs the Workers AI permission, "
+                             f"and the account ID must be the one it belongs to. Cloudflare says: {said[:300]}")
+    return "other", describe_exc(e, 300)
+
+
+async def token_status(ai: "WorkersAI") -> str:
+    """Ask Cloudflare about the token itself: active | expired | disabled | unknown (not recognised).
+
+    Tries the user-token and the account-token check, since either kind may be in use."""
+    try:
+        for path in ("/user/tokens/verify", f"/accounts/{ai.account_id}/tokens/verify"):
+            try:
+                r = await ai._http.get(f"https://api.cloudflare.com/client/v4{path}")
+                body = r.json()
+            except Exception:  # noqa: BLE001 - this is a best-effort extra opinion
+                continue
+            if body.get("success") and isinstance(body.get("result"), dict):
+                return str(body["result"].get("status", "unknown"))
+    except Exception:  # noqa: BLE001
+        pass
+    return "unknown"
+
+
+async def explain_auth_failure(ai: "WorkersAI", e: BaseException) -> tuple[str, str]:
+    """`explain_error`, and for a rejected token also ask Cloudflare WHY (expired? revoked? wrong account?)."""
+    kind, text = explain_error(e)
+    if kind != "auth":
+        return kind, text
+    status = await token_status(ai)
+    if status == "expired":
+        return "auth", "The API token has expired. Create a new one in the Cloudflare dashboard and save it in Settings."
+    if status == "disabled":
+        return "auth", "The API token is disabled or revoked. Create a new one and save it in Settings."
+    if status == "active":
+        return "auth", ("The token itself is valid, but Cloudflare did not accept it for THIS account. Check that the "
+                        "account ID in Settings is the account the token was created for, and that the token has the "
+                        "Workers AI permission.")
+    return "auth", ("Cloudflare does not recognise this token (a typo, a different Cloudflare account's token, or it "
+                    "was deleted/rolled). Create a new one and save it in Settings.")

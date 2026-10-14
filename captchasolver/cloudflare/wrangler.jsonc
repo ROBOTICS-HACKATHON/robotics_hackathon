@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "captchasolver",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+
+  "vars": {
+    // "public": anyone with the link can open the app and use it with THEIR OWN Cloudflare account ID
+    // and API token (typed into Settings, kept in their browser). Rate limits protect the container.
+    // To require login instead, set "access" and fill in the two ACCESS_* values below (see ../README.md).
+    "AUTH_MODE": "public",
+    "ACCESS_TEAM_DOMAIN": "",        // only for AUTH_MODE "access", e.g. "myteam.cloudflareaccess.com"
+    "ACCESS_AUD": "",                // only for AUTH_MODE "access": the application's AUD tag
+    "ALLOW_UNAUTHENTICATED_DEV": "false", // only ever "true" for `wrangler dev`
+    "ALLOWED_TEST_HOSTS": "skibidisigma67rizz.pages.dev", // hosts the test runner may visit
+    // "off" = no rate limits at all (the live demo: the robot calls often, with its own keys).
+    // Set "on" if the URL is shared widely: the limits are what protect the container from abuse.
+    "RATE_LIMITS": "off"
+  },
+
+  "containers": [
+    {
+      "class_name": "CaptchaApp",
+      "image": "../Dockerfile",
+      "image_build_context": "..",
+      "max_instances": 1,           // runs live in memory, so one instance serves everyone
+      "instance_type": { "vcpu": 2, "memory_mib": 6144, "disk_mb": 8000 } // Cloudflare requires >= 3 GiB of memory per vCPU
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "CAPTCHA_APP", "class_name": "CaptchaApp" }]
+  },
+  "exports": {
+    "CaptchaApp": { "type": "durable-object", "storage": "sqlite" }
+  },
+
+  "observability": { "enabled": true }
+}

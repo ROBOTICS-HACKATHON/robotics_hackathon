@@ -17,7 +17,7 @@ import time
 
 import numpy as np
 
-from common import (ForceGuard, ScreenModel, connect_follower, follow_path, load_calib, move_to,
+from common import (ForceGuard, countdown, ScreenModel, connect_follower, follow_path, load_calib, move_to,
                     read_joints, set_torque_limit, settle)
 
 
@@ -166,6 +166,7 @@ if __name__ == "__main__":
     p.add_argument("--random", type=int, default=0, metavar="N", help="tap N random points and measure")
     p.add_argument("--no-measure", action="store_true", help="tests without the page reporting touches")
     p.add_argument("--http-port", type=int, default=8765)
+    p.add_argument("--delay", type=float, default=5, help="seconds to switch to the page before starting")
     p.add_argument("--home", action="store_true")
     p.add_argument("--port", required=True)
     p.add_argument("--id", default="my_follower")
@@ -207,8 +208,7 @@ if __name__ == "__main__":
     if (a.test or a.random) and not a.no_measure:
         from touchserver import TouchServer, save_log
         srv = TouchServer(a.http_port, mode="test", msg="Tap test: blue dots show where the robot touched")
-        print("Reload the page on the touch screen. Starting in 3 s...")
-        time.sleep(3)
+        countdown(a.delay, "switch to the page on the touch screen (reload it, full-screen F11)")
 
     results = []
     with Tapper(a.port, a.id, a.robot, a.lift, a.press, a.speed, via_home=not a.no_home,

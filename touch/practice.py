@@ -13,7 +13,7 @@ import time
 
 import numpy as np
 
-from common import load_calib
+from common import countdown, load_calib
 from correction import calib_id
 from learner import LearnedModel, PressBandit, refine
 from tap import Tapper
@@ -29,6 +29,7 @@ p.add_argument("--tries", type=int, default=5, help="max attempts per target")
 p.add_argument("--speed", type=float, default=1.0)
 p.add_argument("--max-load", type=int, default=200)
 p.add_argument("--http-port", type=int, default=8765)
+p.add_argument("--delay", type=float, default=5, help="seconds to switch to the page before starting")
 a = p.parse_args()
 
 calib = load_calib()
@@ -39,8 +40,7 @@ rng = np.random.default_rng()
 targets = rng.uniform(lo, hi, size=(a.targets, 2)).round(3)
 
 srv = TouchServer(a.http_port, mode="test", msg="Practice: the robot is teaching itself")
-print("Reload the page on the touch screen. Starting in 3 s...")
-time.sleep(3)
+countdown(a.delay, "switch to the page on the touch screen (full-screen, F11)")
 
 results = []
 with Tapper(a.port, a.id, a.robot, speed=a.speed, max_load=a.max_load, correct=False, learned=False) as t:

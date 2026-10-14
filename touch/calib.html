@@ -70,6 +70,14 @@
   }
   if (live) poll();
 
+  // Enter / Space on the page works like Enter in the terminal (page and terminal on one screen)
+  addEventListener("keydown", e => {
+    if (!live || !(e.key === "Enter" || e.key === " ")) return;
+    e.preventDefault();
+    fetch("/key", {method: "POST"});
+    status("Enter sent"); holdMsgUntil = Date.now() + 800;
+  });
+
   addEventListener("pointerdown", e => {
     e.preventDefault();
     const r = f.getBoundingClientRect();

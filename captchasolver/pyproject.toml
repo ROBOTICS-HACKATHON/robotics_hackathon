@@ -8,6 +8,7 @@ dependencies = ["httpx>=0.27", "pillow>=10", "playwright>=1.45", "numpy>=1.26"]
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio"]
+server = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "python-multipart>=0.0.9"]
 
 [project.scripts]
 captchasolver = "captchasolver.cli:main"
@@ -16,6 +17,7 @@ captchasolver-probe = "captchasolver.probe:main"
 captchasolver-test = "captchasolver.bench:main"
 captchasolver-compare = "captchasolver.compare:main"
 captchasolver-replay = "captchasolver.bench:replay_main"
+captchasolver-serve = "captchasolver.server:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -26,3 +28,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[tool.setuptools.package-data]
+"captchasolver.server" = ["static/*"]

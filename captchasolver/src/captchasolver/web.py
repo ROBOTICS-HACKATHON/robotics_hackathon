@@ -14,6 +14,60 @@ DEFAULT_URL = "https://skibidisigma67rizz.pages.dev/"
 CHALLENGE = "#image-challenge"
 
 
+class SiteDidNotAnswer(RuntimeError):
+    """After Verify the site showed neither acceptance nor rejection. That is an ERROR, never a FAIL:
+    a slow site (or a slow container) must not be able to turn a correct answer into a failure."""
+
+
+ACCEPTED = f'{CHALLENGE}[data-state="success"]'
+REJECTED = f'{CHALLENGE}[data-state="error"]'
+
+
+async def _outcome(page: Page, timeout_ms: int = 30000) -> bool:
+    """After Verify: True = the site accepted the selection, False = it rejected it.
+
+    Three signals, first one wins: the success state, the error state ("Incorrect selection"), or the
+    navigation to /verified/ (which the site only starts after accepting). A wrong answer answers at once,
+    so the long timeout only matters for slow accepts. If nothing shows within it, raise SiteDidNotAnswer.
+    """
+    async def watch(coro, verdict):
+        try:
+            await coro
+        except PWTimeout:
+            return None
+        except Exception:                 # e.g. 'context destroyed': the page is navigating; re-check below
+            return None
+        return verdict
+    pending = {
+        asyncio.ensure_future(watch(page.wait_for_url("**/verified/**", timeout=timeout_ms, wait_until="commit"), True)),
+        asyncio.ensure_future(watch(page.wait_for_selector(ACCEPTED, state="attached", timeout=timeout_ms), True)),
+        asyncio.ensure_future(watch(page.wait_for_selector(REJECTED, state="attached", timeout=timeout_ms), False)),
+    }
+    verdict = None
+    try:
+        while pending and verdict is None:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            verdicts = [t.result() for t in done if t.result() is not None]
+            verdict = verdicts[0] if verdicts else None
+    finally:
+        for t in pending:
+            t.cancel()
+    if verdict is not None:
+        return verdict
+    # Last, definitive look at where the page ended up.
+    if "/verified" in page.url:
+        return True
+    try:
+        if await page.locator(ACCEPTED).count():
+            return True
+        if await page.locator(REJECTED).count():
+            return False
+    except Exception:
+        pass
+    raise SiteDidNotAnswer(f"The site neither accepted nor rejected the answer within {timeout_ms // 1000} s.")
+
+
+
 @dataclass
 class Result:
     index: int
@@ -48,11 +102,9 @@ async def solve_image_challenge(page: Page, ai: WorkersAI, *, mode: str = "ask",
         for i in picked:
             await tiles.nth(i).click()
         await page.click(f"{CHALLENGE} .verify-button")
-        try:
-            await page.wait_for_url("**/verified/**", timeout=4000)
+        if await _outcome(page):          # raises SiteDidNotAnswer if the site never answers: an error, not a fail
             return subject, picked, True, attempt
-        except PWTimeout:
-            await page.click(f"{CHALLENGE} .reset-button")
+        await page.click(f"{CHALLENGE} .reset-button")
     return subject, picked, False, max_attempts
 
 
