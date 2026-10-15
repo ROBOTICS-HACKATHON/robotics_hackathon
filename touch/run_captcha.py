@@ -215,9 +215,12 @@ class Run:
             return None, None, None
         kind = site.get("kind")
         tg = lambda n: self.web.target(site, n)  # noqa: E731
-        if not site.get("fullscreen") and not getattr(self, "_warned_fs", False):
-            self._warned_fs = True
-            self.say("   note: the site is not full-screen; taps may land off (calibration assumes full-screen)")
+        if site.get("fullscreen") is False and site.get("sw"):
+            if not getattr(self, "_warned_fs", False):
+                self._warned_fs = True
+                self.say(f"   the page is {site.get('w')}x{site.get('h')} but the screen is {site.get('sw')}x{site.get('sh')}: "
+                         "press F11 on the touch screen (waiting; nothing is tapped until then)")
+            return "wait", None, None
         if kind == "choice":
             start, card = tg("start"), tg("card")
             spot, why = ((start, "on 'Start session'") if self.cfg.training and start else (card, "on the reCAPTCHA card"))
@@ -506,9 +509,15 @@ class LearningArm:
         arm = t.zones.best(zone) if t.zones is not None else None
         t.last_touch_q = None
         t.tap(u, v)
-        got = self.web.all_touches()
+        got = self.web.all_touches(wait=4.0 if self.web.errors else 1.5)   # slow link: wait longer
         rec = {"target": [float(u), float(v)], "zone": zone, "press": t.press, "touches": len(got), "err_px": None,
                "landed": None, "el": None, "t": time.time()}
+        if got and not got[0].get("fullscreen", True):
+            g = got[0]
+            rec.update(landed=[g["u"], g["v"]], el=g.get("el"), reward=None, skipped="not full-screen")
+            self.say("      (page not full-screen: this touch is not learned from)")
+            self.taps.append(rec)
+            return
         if got:
             g = got[0]
             w, h = g.get("w") or 1000, g.get("h") or 1000
@@ -520,7 +529,14 @@ class LearningArm:
             if t.last_touch_q is not None:
                 t.exp.add(t.last_touch_q, (g["u"], g["v"]), (u, v), r, t.press,
                           {"src": "captcha", "err_px": err, "el": g.get("el")})
-            self.say(f"      landed {err:4.0f}px from the aim" + (f" on {g['el']}" if g.get("el") else ""))
+            rec["miss_px"] = [round((g["u"] - u) * w, 1), round((g["v"] - v) * h, 1)]
+            self.say(f"      landed {err:4.0f}px from the aim ({rec['miss_px'][0]:+.0f} right, {rec['miss_px'][1]:+.0f} down)"
+                     + (f" on {g['el']}" if g.get("el") else ""))
+        elif self.web.errors:
+            rec.update(reward=None, skipped="robot link down")
+            self.say("      (robot link down: don't know if it touched; not learned from)")
+            self.taps.append(rec)
+            return
         else:
             r = self._reward(0, False, 0, t.last_force_stop, self.tol)
             rec["reward"] = r
@@ -634,7 +650,12 @@ def main():
         raise SystemExit(e.detail)
 
     def look():
-        return cam.screen_image(tries=6, allow_remembered=False)
+        try:
+            return cam.screen_image(tries=6, allow_remembered=False)
+        except Exception as e:  # a phone stream dropping out: no picture this time, look again
+            print(f"   (camera: {e})", flush=True)
+            time.sleep(0.5)
+            return None
 
     def solve(img, target, model):
         return solve_screen(img, cfg_s, target, model, (w, h))

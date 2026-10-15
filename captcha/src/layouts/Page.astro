@@ -26,6 +26,17 @@ const training = Astro.url.pathname.startsWith('/training') || Astro.url.pathnam
         const MAX_TRAVEL = 150, WAIT_MS = 60;
         const CONTROL = 'button, a[href], label, summary, input:not([type="range"])';
         let down = null, nativeClick = false;
+        // A bouncing stylus touches twice: two clicks on the same tile would tick it and untick it again.
+        // A second click on the same control within BOUNCE_MS is dropped.
+        const BOUNCE_MS = 600;
+        let lastClick = { el: null, t: 0 };
+        document.addEventListener('click', (e) => {
+          const el = e.target instanceof Element ? e.target.closest(CONTROL) : null;
+          if (!el) return;
+          const now = performance.now();
+          if (lastClick.el === el && now - lastClick.t < BOUNCE_MS) { e.stopImmediatePropagation(); e.preventDefault(); return; }
+          lastClick = { el, t: now };
+        }, true);
         document.addEventListener('click', () => { nativeClick = true; }, true);
         // Dragging across a picture would start an image drag-and-drop, which cancels the touch.
         document.addEventListener('dragstart', (e) => e.preventDefault(), true);

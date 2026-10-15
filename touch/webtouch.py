@@ -89,7 +89,8 @@ class WebTouches:
                 return
             self.touches.put({"u": float(ev["u"]), "v": float(ev["v"]), "w": ev.get("w"), "h": ev.get("h"), "t": now,
                               "el": ev.get("el"), "page": ev.get("page"), "phase": ev.get("phase"),
-                              "challenge": ev.get("challenge"), "id": ev["id"]})
+                              "challenge": ev.get("challenge"), "id": ev["id"],
+                              "fullscreen": ev.get("state") != "window"})
             self.touched.set()
         elif ev["type"] == "result":
             self.results.put({"state": ev.get("state"), "challenge": ev.get("challenge"), "t": now, "id": ev["id"]})

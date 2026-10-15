@@ -36,6 +36,9 @@
     if (!c) return e.tagName.toLowerCase();
     return c.id ? '#' + c.id : c.tagName.toLowerCase() + (typeof c.className === 'string' && c.className ? '.' + c.className.split(' ')[0] : '');
   };
+  // F11 (browser full-screen) does not set document.fullscreenElement: compare the page with the screen instead
+  const isFull = () => !!document.fullscreenElement
+    || (Math.abs(innerWidth - screen.width) <= 2 && Math.abs(innerHeight - screen.height) <= 2);
   const challenge = () => document.querySelector('#session-progress-label')?.textContent?.trim() || '';
   const phase = () => document.querySelector('dialog[open]')?.getAttribute('data-phase') || '';
 
@@ -43,7 +46,8 @@
     if (!e.isPrimary) return;
     const w = innerWidth - 2 * INSET, h = innerHeight - 2 * INSET;
     const d = { type: 'touch', u: (e.clientX - INSET) / w, v: (e.clientY - INSET) / h, w, h, x: e.clientX, y: e.clientY,
-      pointer: e.pointerType, el: describe(e.target), page: location.pathname, phase: phase(), challenge: challenge() };
+      pointer: e.pointerType, el: describe(e.target), page: location.pathname, phase: phase(), challenge: challenge(),
+      state: isFull() ? 'full' : 'window' };
     document.dispatchEvent(new CustomEvent('robot-touch', { detail: d }));
     send(d);
   }, { capture: true, passive: true });
@@ -73,7 +77,7 @@
     } else if (path.startsWith('/training')) {
       kind = 'choice'; t.start = centre('#start-session'); t.card = centre('.choice[data-challenge="image"]');
     }
-    return { kind, path, targets: t, w: innerWidth, h: innerHeight, fullscreen: !!document.fullscreenElement,
+    return { kind, path, targets: t, w: innerWidth, h: innerHeight, sw: screen.width, sh: screen.height, dpr: devicePixelRatio, fullscreen: isFull(),
       markers: !!document.querySelector('#screen-markers:popover-open'), challenge: challenge() };
   };
   let lastScreen = '', lastSent = 0;
