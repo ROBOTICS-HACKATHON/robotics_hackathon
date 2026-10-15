@@ -34,6 +34,8 @@ p.add_argument("--cameras", default="", help="tip vision cameras: 'none', one, o
 p.add_argument("--tip-color", default="pink")
 p.add_argument("--screen-mm", type=float, default=300.0, help="marker-to-marker screen width (for mm heights)")
 p.add_argument("--delay", type=float, default=5, help="seconds to switch to the page before starting")
+p.add_argument("--web", action="store_true",
+               help="practise on the real website (<TOUCH_WEB>/practice/) instead of the local calib page")
 a = p.parse_args()
 
 calib = load_calib()
@@ -43,8 +45,13 @@ hi = [max(q["u"] for q in cal), max(q["v"] for q in cal)]
 rng = np.random.default_rng()
 centers = zone_centers(calib)
 
-srv = TouchServer(a.http_port, mode="test", msg="Practice: the robot is teaching itself")
-countdown(a.delay, "switch to the page on the touch screen (full-screen, F11)")
+if a.web:
+    from webtouch import WebTouches
+    srv = WebTouches(mode="test", msg="Practice: the robot is teaching itself")
+    countdown(a.delay, f"open {srv.base}/practice/ on the touch screen (full-screen, F11)")
+else:
+    srv = TouchServer(a.http_port, mode="test", msg="Practice: the robot is teaching itself")
+    countdown(a.delay, "switch to the page on the touch screen (full-screen, F11)")
 
 results = []
 vision = None
@@ -55,7 +62,8 @@ with Tapper(a.port, a.id, a.robot, speed=a.speed, max_load=a.max_load, correct=F
             vision=vision) as t:
     if vision is not None:
         print(vision.describe())
-    t.stop_on_touch(srv)  # stop pressing the moment the page reports the touch
+    if not a.web:  # over the internet the touch report comes too late to stop the press with
+        t.stop_on_touch(srv)  # stop pressing the moment the page reports the touch
     exp = t.exp
     bandit = ZoneBandit(exp, centers)
     print(f"Starting with {len(exp)} touches of past experience for this calibration.")

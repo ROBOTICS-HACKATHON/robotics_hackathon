@@ -47,6 +47,7 @@ const training = Astro.url.pathname.startsWith('/training') || Astro.url.pathnam
         document.addEventListener('pointercancel', (e) => finish(e, false), true);
       })();
     </script>
+    <script is:inline src="/robot-link.js"></script>
   </head>
   <body>
     <header class="site-header">

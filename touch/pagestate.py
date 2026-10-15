@@ -328,6 +328,11 @@ class SiteLayout:
         t = self.pages.get(name, {}).get("tap")
         return (t[0], t[1]) if t else None
 
+    def start_tap(self):
+        """Where 'Start session' is on the choice (Training) page, if taught (--learn-layout --only start)."""
+        t = self.pages.get("choice", {}).get("start")
+        return (t[0], t[1]) if t else None
+
     def missing(self):
         return [n for n in PAGES if n not in self.pages or (n in TAP_PAGES and "tap" not in self.pages[n])]
 

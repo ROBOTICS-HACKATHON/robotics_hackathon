@@ -21,6 +21,8 @@ from pagestate import PAGES, TAP_PAGES, SiteLayout
 HOWTO = {
     "choice": "the first page: 'Access website' with the three cards (reCAPTCHA / GeeTest / Turnstile)",
     "checkbox": "the 'I'm not a robot' box (click the reCAPTCHA card by hand to get there)",
+    "start": "the Training page again (same as 'choice'): this time the robot learns where 'Start session' is, "
+             "so ./lr captcha-train can start sessions by itself",
     "verified": "the 'Access granted' page (solve one by hand; faster: Training settings -> Practice mode "
                 "'Single tile' -> click the highlighted tile)",
 }
@@ -112,6 +114,15 @@ def learn(cam, layout_path, out_dir, delay=5, port=8765, only=None):
             raise SystemExit("Can't see all 4 markers. Tick 'Camera markers' on the site, check the camera "
                              "(./lr cam-test), then run --learn-layout again.")
         cv2.imwrite(str(out_dir / f"layout_{name}.png"), img)
+        if name == "start":
+            if "choice" not in layout.pages:
+                raise SystemExit("Teach the 'choice' page first (./lr captcha --learn-layout --only choice).")
+            u, v = pick_point(img, "Click the 'Start session' button",
+                              "The photo is what the robot sees. Click the centre of 'Start session'.", port)
+            layout.pages["choice"]["start"] = [round(u, 5), round(v, 5)]
+            layout.save()
+            print(f"   saved start: 'Start session' at u={u:.3f} v={v:.3f}")
+            continue
         u, v = pick_point(img, f"Click {TAP_PAGES[name]}",
                           "The photo is what the robot sees. Click the centre of the thing it must tap.", port)
         mark = img.copy()

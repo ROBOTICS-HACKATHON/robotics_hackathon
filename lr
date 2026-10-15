@@ -13,6 +13,9 @@ source "$HERE/lr.conf"
 export SOLVER_URL="${SOLVER_URL:-https://captchasolver.alvaro-camposmndz.workers.dev}"
 export CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-}"
 export CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
+# Robot link (captcha/ site with its /api): the site reports where every tap landed and each pass/fail.
+export TOUCH_WEB="${TOUCH_WEB:-}"
+export ROBOT_KEY="${ROBOT_KEY:-}"
 
 IMAGE=lerobot
 OUT="$HERE/outputs"
@@ -121,7 +124,7 @@ run_hw() {
   # shellcheck disable=SC2086
   [ "$SCREENCAP" = 1 ] && start_screencap
   $RT run --rm -it --privileged -v /dev:/dev -v "$HERE":/repo ${RUN_EXTRA:-} $(common_flags) \
-    -e SOLVER_URL -e CLOUDFLARE_ACCOUNT_ID -e CLOUDFLARE_API_TOKEN "$IMAGE" "$@"
+    -e SOLVER_URL -e CLOUDFLARE_ACCOUNT_ID -e CLOUDFLARE_API_TOKEN -e TOUCH_WEB -e ROBOT_KEY "$IMAGE" "$@"
 }
 
 hf_user() {
@@ -364,6 +367,21 @@ cmd_captcha() {
     --delay "${DELAY:-5}" "$@"
 }
 
+need_link() {
+  [ -n "$TOUCH_WEB" ] && [ -n "$ROBOT_KEY" ] \
+    || die "set TOUCH_WEB (your site, e.g. https://mehras-captcha.pages.dev) and ROBOT_KEY in lr.conf (see captcha/README.md 'Robot link')"
+}
+
+# Training on the real site: starts sessions itself, keeps going after wrong answers, learns from every tap.
+cmd_captcha-train() {
+  need_solver
+  need_link
+  say "On the touch screen: ${TOUCH_WEB}/training/?robot=<ROBOT_KEY> (once), full-screen, 'Camera markers' ticked"
+  # shellcheck disable=SC2046
+  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/run_captcha.py $(ARM_ARGS) --camera "$CAMERA" --out /work/outputs/train \
+    --delay "${DELAY:-5}" --training --web --count 100 "$@"
+}
+
 cmd_tip-live() {
   local cams="${CAMERA:-}"
   [ -n "${CAMERA2:-}" ] && cams="${cams:+$cams,}$CAMERA2"
@@ -440,7 +458,11 @@ Touch screen
   solve                     Camera -> screenshot -> solver API -> prints where to press (no arm, never taps)
   plan [--image FILE]       One photo -> JSON of what to click next, as u,v (0..1). Never moves the arm
   captcha [--count N]       Full loop on the real site: see, solve, tap tiles, check, Verify, read result
-                            (--learn-layout teaches the choice/checkbox pages once; --dry-run = camera + solver, no arm)
+                            (--learn-layout teaches the choice/checkbox pages once; --dry-run = camera + solver, no arm;
+                             --web = robot link: the site reports pass/fail and where each tap landed, and it learns)
+  captcha-train [--count N] Training on the real site (robot link): starts sessions by itself, keeps going after
+                            wrong answers, learns from every tap (teach 'Start session' once: --learn-layout --only start)
+  practice --web            Practice on <TOUCH_WEB>/practice/ instead of the local calib page
   tip-live                  Live browser view of both cameras + tip height in mm (no arm needed)
                             (save photos, click the pen tip to teach its colour)
   smooth-preview [--accel N --speed S --smooth X]
@@ -453,7 +475,7 @@ EOF
 
 c="${1:-help}"; shift || true
 case "$c" in
-  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|teach-dirs|tap|see|fit|practice|cam-test|tip-test|heatmap|tip-live|share|smooth-preview|solve|plan|captcha)
+  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|teach-dirs|tap|see|fit|practice|cam-test|tip-test|heatmap|tip-live|share|smooth-preview|solve|plan|captcha|captcha-train)
     "cmd_$c" "$@" ;;
   *) cmd_help; exit 1 ;;
 esac

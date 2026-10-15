@@ -77,3 +77,34 @@ The site supplies the tasks and answer labels; it does not record camera frames
 or robot actions. Those recordings are needed to train the robot policy.
 
 This is a local mock, not an authentication system. No external CAPTCHA service is used.
+
+## Robot link (training the arm on the real site)
+
+With the robot link on, the site reports **every touch** (where it landed, in the same `u, v` as the arm's
+calibration: the rectangle between the markers' outer corners) and **every challenge result** (pass / fail) to
+its own API, `/api/touches` (`functions/api/[[path]].ts`). The robot reads them (`touch/webtouch.py`), so
+CAPTCHA runs train the arm just like `./lr practice`, and the robot knows pass/fail without guessing from the camera.
+
+Off unless a browser has the key: open any page once with `?robot=<ROBOT_KEY>` (`?robot=` turns it off).
+With the link on, training sessions move on to the next challenge after a wrong answer (option in the session panel).
+`/practice/` is the arm practice page (the hosted version of `touch/calib.html` test mode).
+
+Setup on your Cloudflare Pages project (once), from `captcha/`:
+
+```sh
+npx wrangler d1 create robot-link                     # a small database for the touches
+# Dashboard: Workers & Pages -> <project> -> Settings -> Bindings -> Add -> D1 database:
+#            variable name DB, database robot-link (for Production)
+openssl rand -hex 16                                   # make a key
+npx wrangler pages secret put ROBOT_KEY --project-name <project>   # paste the key
+bun run build && npx wrangler pages deploy dist --project-name <project> --branch <production branch>
+```
+
+Robot side, in `lr.conf`: `TOUCH_WEB=https://<project>.pages.dev` and `ROBOT_KEY=<key>`. Then:
+
+- `./lr captcha --learn-layout --only start` once: show the Training page, click "Start session" on the photo
+- `./lr captcha-train --count 50`: starts sessions itself, solves, keeps going after wrong answers, learns from every tap
+- `./lr practice --web`: arm practice on `<site>/practice/`
+- `python touch/webtouch.py` (with the two variables set) prints touches and results live: a quick link test
+
+Without the D1 binding and the secret the site works exactly as before; `/api/*` answers 503.

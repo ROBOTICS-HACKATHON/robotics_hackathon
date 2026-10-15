@@ -43,6 +43,7 @@ const { demo = false } = Astro.props;
       <label for="session-split">Split<select id="session-split"><option value="train">Train · {trainingCatalog.filter((entry) => entry.split === 'train').length}</option><option value="test">Test · {trainingCatalog.filter((entry) => entry.split === 'test').length}</option></select></label>
       <label for="session-kind">Tasks<select id="session-kind"><option value="image">Image (default)</option><option value="slider">Slider (bonus)</option><option value="mixed">Mixed (optional)</option></select></label>
       <label for="session-count">Count<input id="session-count" type="number" min="1" value="100" /></label>
+      <label class="fullscreen-option"><input type="checkbox" id="session-skip-fail" /> Next challenge after a wrong answer</label>
       <p id="session-availability" class="muted" role="status"></p>
       <button id="start-session" class="button primary" type="button">Start session</button>
     </aside>
@@ -351,6 +352,30 @@ const { demo = false } = Astro.props;
     }
     retryCompletion?.addEventListener('click', saveCompletion);
 
+    // Robot training: after a wrong answer, show the error for a moment, then move on to the next challenge
+    // (the result has already been reported to the robot). Default on when the robot link is on.
+    const skipFail = document.querySelector<HTMLInputElement>('#session-skip-fail');
+    if (skipFail) {
+      const saved = readPreference('local', 'captcha-session-skip-fail');
+      skipFail.checked = saved ? saved === 'on' : document.documentElement.dataset.robotLink === 'on';
+      skipFail.addEventListener('change', () => savePreference('local', 'captcha-session-skip-fail', skipFail.checked ? 'on' : 'off'));
+    }
+    function skipAfterFail() {
+      if (complete || pending || !dialog?.open || queue.length === 0) return;
+      pending = true;
+      const currentGeneration = generation;
+      advanceTimer = window.setTimeout(() => {
+        if (currentGeneration !== generation) return;
+        const next = queue[queuePosition + 1];
+        if (next) {
+          queuePosition += 1;
+          void launchChallenge(next.kind, next.index);
+          return;
+        }
+        saveCompletion();
+      }, 2500);
+    }
+
     function finish() {
       if (complete || pending || !dialog?.open) return;
       if (queue.length > 0) {
@@ -448,6 +473,7 @@ const { demo = false } = Astro.props;
       const detail: unknown = event.detail;
       if (typeof detail !== 'object' || detail === null || !('state' in detail) || !('kind' in detail)) return;
       if (detail.state === 'success' && detail.kind === kind) finish();
+      if (detail.state === 'error' && detail.kind === kind && skipFail?.checked) skipAfterFail();
     });
     if (demo) {
       let introTimer: number | undefined;
