@@ -71,7 +71,12 @@ page: `see.py` cuts the image to the rectangle between them and scales it to a f
 `u = x / 1280`, `v = y / 800`. Nothing is calibrated, and the page can sit anywhere on the screen.
 
 The same code can read a camera instead (USB or RealSense, a phone running IP Webcam or DroidCam, a URL) for a screen that
-is a separate monitor. The demo doesn't use this, and it has not been tested. In theory, the actual recognition should work.
+is a separate monitor. The demo doesn't use this. We did test it, and it barely worked.
+
+<p align="center">
+  <img src="media/camera.gif" width="60%">
+  <br><em>The camera mode works... barely :)</em>
+</p>
 
 ### 3. The brain ([`captchasolver/`](captchasolver/))
 
@@ -257,6 +262,49 @@ demo doesn't use one. For tapping a screen, calibration plus self-practice was s
 
 The website's **Training** page is related but different: it hands out tasks and answer labels (train/test split, sessions of
 100). It doesn't record camera frames or robot actions, which a policy would need.
+
+### 5. Training on the real site: the robot link (branch [`mehras-features`](../../tree/mehras-features))
+
+Practice (2.) happens on a bare page of dots. This trains the arm **while it solves real captchas on the website**, so
+every tap of a real run is also practice. The robot side (`touch/`, `./lr`) is merged into `main`. The website side, a
+small API and a reporting script, lives on the `mehras-features` branch, so `main`'s demo site stays as filmed. Deploy
+that branch to your own Cloudflare Pages project to use it ([`captcha/README.md` there](../../blob/mehras-features/captcha/README.md),
+section "Robot link").
+
+```mermaid
+flowchart LR
+  P["Captcha page<br/>on the touch screen"] -->|"every touch (u, v), every click,<br/>pass / fail, which screen + where its buttons are"| API["/api on the same site<br/>(Cloudflare Pages Function + D1)"]
+  API --> R["robot: touch/webtouch.py"]
+  R -->|"tap (u, v)"| P
+```
+
+- **The page reports, the robot reads.** With the link on (open the site once with `?robot=<key>`), the page sends every
+  touch in the same `u, v` as the calibration, every click, each challenge's pass/fail, and which screen it shows with
+  where its buttons are. The robot reads that from `/api` (`touch/webtouch.py`).
+- **No layout teaching.** The robot taps the buttons the page names ("Start session", "I'm not a robot", "Start again")
+  and finds the grid in its screenshot as before. `--learn-layout` is only needed without the link.
+- **Every captcha tap is practice.** Each tap's real landing spot goes into the same experience as `./lr practice`. The
+  aim model is refit after every challenge, and recent touches count more (half weight after 100 touches), so it follows
+  drift and small moves of the arm or screen.
+- **Misclicks are fixed, not guessed.** The solver's answer is kept. The robot checks the selection in the screenshot and
+  re-taps only the tiles that differ. A Verify tap that the page saw land elsewhere is repeated at once, aimed against the
+  measured miss. After "Incorrect selection" (a misclick, since the answer was right) it retries the same challenge.
+  The page moves on after 5 wrong answers.
+- **Built for a real touch screen.** One press counts as at most one click (a Windows touch screen can turn one longer
+  press into two, which ticks a tile and unticks it again). Press-and-hold text selection and the context menu are off.
+  Without an instant touch signal the press is short and fixed.
+- **All views.** With `CAMERA=auto` the pixel-exact screenshot goes to the solver and locates the grid. The phone
+  cameras (`CAMERA_PHONE`, `CAMERA2`) are fallback views and watch the stylus tip during taps.
+
+```bash
+# lr.conf: TOUCH_WEB=https://<your-project>.pages.dev  ROBOT_KEY=<the secret set on Cloudflare>  CAMERA=auto
+python3 touch/webtouch.py                    # link test: prints touches, clicks, screens and results live
+./lr practice --web --targets 20             # practice on <site>/practice/
+./lr captcha-train --count 5 --size 1280x853 # starts sessions itself, solves, retries misclicks, learns from every tap
+```
+
+Each run saves, per challenge, the screenshots, the solver's answer and `taps.json` (aim, landing spot, miss in pixels,
+what was clicked) in `outputs/train/<time>/`.
 
 ## Run it yourself
 
