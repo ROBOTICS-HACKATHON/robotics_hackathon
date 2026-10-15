@@ -18,6 +18,36 @@ IMAGE=lerobot
 OUT="$HERE/outputs"
 mkdir -p "$OUT" "$LR_DATA"
 
+# CAMERA=auto: use the phones (CAMERA_PHONE, CAMERA2) when they answer, otherwise the live screenshot.
+cam_ok() {  # is this camera reachable right now? (quick: ~1 s per phone)
+  local c="$1" host
+  case "$c" in
+    ""|screen) return 1 ;;
+    /dev/*) [ -e "$c" ] ;;
+    ipwebcam:*) host="${c#ipwebcam:}"; [[ "$host" == *:* ]] || host="$host:8080"
+                [ "$(curl -s -m 1.5 -o /dev/null -w '%{http_code}' "http://$host/shot.jpg" 2>/dev/null)" = 200 ] ;;
+    droidcam:*) host="${c#droidcam:}"; [[ "$host" == *:* ]] || host="$host:4747"
+                curl -s -m 1.5 -o /dev/null "http://$host/" 2>/dev/null ;;
+    http*) curl -s -m 1.5 -o /dev/null "$c" 2>/dev/null ;;
+    *) return 0 ;;
+  esac
+}
+resolve_cameras() {
+  [ "${CAMERA:-}" = auto ] || return 0
+  if cam_ok "${CAMERA_PHONE:-}"; then
+    CAMERA="$CAMERA_PHONE"
+    echo -e "\033[1;34m==>\033[0m Camera: phone ${CAMERA} (it answered)" >&2
+  else
+    CAMERA=screen
+    echo -e "\033[1;34m==>\033[0m Camera: no phone answered${CAMERA_PHONE:+ ($CAMERA_PHONE)}, using the screenshot" >&2
+  fi
+  if [ -n "${CAMERA2:-}" ] && ! cam_ok "$CAMERA2"; then
+    echo -e "\033[1;34m==>\033[0m Second camera $CAMERA2 not answering: tapping without it" >&2
+    CAMERA2=""
+  fi
+}
+resolve_cameras
+
 # CAMERA=screen: a live screenshot of THIS computer's screen instead of a camera (the CAPTCHA page with its
 # 4 corner markers is on this screen). PowerShell saves outputs/screen_live.jpg ~4x a second while a command runs.
 SCREENCAP=0
@@ -29,10 +59,10 @@ start_screencap() {
   local f="$OUT/screen_live.jpg" age
   age=$(( $(date +%s) - $(stat -c %Y "$f" 2>/dev/null || echo 0) ))
   if [ "$age" -gt 3 ]; then
-    die "CAMERA=screen, but no fresh screenshot in outputs/screen_live.jpg.
-    Start the screen capture in a PowerShell window (and leave it open):
-      powershell -ExecutionPolicy Bypass -File \"\$HOME\\Downloads\\screencap.ps1\"
-    (the script is also in the repo: touch/screencap.ps1)"
+    die "Using the screenshot, but outputs/screen_live.jpg is not being updated.
+    Start FFmpeg in a PowerShell window and leave it open:
+      ffmpeg -hide_banner -loglevel warning -f gdigrab -framerate 4 -draw_mouse 0 -i desktop -q:v 3 -update 1 -y \"\\\\wsl.localhost\\Ubuntu-24.04\\home\\mehras\\robotics_hackathon\\outputs\\screen_live.jpg\"
+    (or switch the phones on, with CAMERA=auto)"
   fi
   say "Camera: live screenshot of this computer's screen (outputs/screen_live.jpg, ${age}s old)"
 }
