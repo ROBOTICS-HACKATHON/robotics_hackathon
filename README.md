@@ -71,7 +71,12 @@ page: `see.py` cuts the image to the rectangle between them and scales it to a f
 `u = x / 1280`, `v = y / 800`. Nothing is calibrated, and the page can sit anywhere on the screen.
 
 The same code can read a camera instead (USB or RealSense, a phone running IP Webcam or DroidCam, a URL) for a screen that
-is a separate monitor. The demo doesn't use this, and it has not been tested. In theory, the actual recognition should work.
+is a separate monitor. The demo doesn't use this. We did test it, and it barely worked.
+
+<p align="center">
+  <img src="media/camera.gif" width="60%">
+  <br><em>The camera mode works... barely :)</em>
+</p>
 
 ### 3. The brain ([`captchasolver/`](captchasolver/))
 
