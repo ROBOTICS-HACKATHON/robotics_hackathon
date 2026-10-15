@@ -1,0 +1,23 @@
+Titile: selflearning bot that is definitly not bot
+1. show video of it solving capcha correctly
+    explain that we create a bot that solves capcha
+2. show video if it fixing it's mistakes in capcha solving
+    epxlain how it works on capchas
+
+------
+explain the self learning part
+3. calibration video
+    explain how other bots are trained that you need to do like 50 iteration of the same action
+        so it can train model
+
+    explain that this is the only immput we give it we basicly let it find the screen
+
+3. show trainign video
+    explain how does the training work that we have feedback loop when it touches the screen it get positive or negative points and 
+        it changes the behaviour acordingly
+
+    generalize it that with this method  we can teach it to touch anywhere on the 2d space becasue of screen validation limitation
+        but we can also do it with cameras where we can reward the robot if it reached proper point in 3d space
+
+    so curently it can do anything on a screen but we can make it train in 3d space autonomously
+
