@@ -112,7 +112,10 @@ class Run:
 
     # ------------------------------------------------------------------ 1. get to the grid
     def reach_grid(self):
-        """Look, and tap whatever page we are on until the image grid is up and steady. Returns (img, state)."""
+        """Look, and tap whatever page we are on until the image grid is up and steady. Returns (img, state).
+        With the robot link the site itself says which screen it shows and where its buttons are, so nothing
+        has to be taught; the camera is still used for the grid (the solver needs the photo). Each page seen
+        that way is also learned from the camera, for runs without the link."""
         cfg, t0 = self.cfg, self.clock()
         taps, last = {}, (None, 0.0)          # taps per page kind; (kind, time) of the last page tap
         blind = 0
@@ -126,48 +129,123 @@ class Run:
                 self.sleep(0.7)
                 continue
             blind = 0
-            st = classify(img, self.layout)
-            self.say(f"   page: {st}")
-            if st.kind == "grid":
+            kind, spot, why = self._site_page(img)
+            if kind is None:                         # no robot link (or it is quiet): the camera decides
+                st = classify(img, self.layout)
+                self.say(f"   page: {st}")
+                kind = st.kind
+                if kind == "grid":
+                    if st.error and cfg.training:
+                        self.say("   the grid still shows the last error: waiting for the next challenge")
+                        self.sleep(1.0)
+                        continue
+                    if st.error:
+                        self.save("page_grid_error", img)
+                        raise RunError("The grid still shows 'Incorrect selection' from before. Reload the page "
+                                       "(or tap its reset button) and start again.")
+                    img2 = self.snap(0.7)               # steady? (images loaded, animations done)
+                    st2 = classify(img2, self.layout) if img2 is not None else None
+                    if st2 is not None and st2.kind == "grid" and not st2.error and _steady(img, img2):
+                        self.save("page_grid", img2)
+                        return img2, st2
+                    continue
+                if kind in PAGES:
+                    spot = self.layout.tap(kind) if self.layout else None
+                    if cfg.training and kind == "choice" and self.layout and self.layout.start_tap():
+                        spot = self.layout.start_tap()      # Training page: start a whole session
+                    why = f"on the {kind} page"
+            elif kind == "grid":
+                try:                                 # the site says grid: the camera finds its geometry
+                    st = _grid_state(img)
+                except GridNotFound as e:
+                    self.say(f"   site: grid, camera: not yet ({e})")
+                    self.sleep(0.7)
+                    continue
                 if st.error and cfg.training:
-                    self.say("   the grid still shows the last error: waiting for the next challenge")
                     self.sleep(1.0)
                     continue
                 if st.error:
                     self.save("page_grid_error", img)
                     raise RunError("The grid still shows 'Incorrect selection' from before. Reload the page "
                                    "(or tap its reset button) and start again.")
-                img2 = self.snap(0.7)               # steady? (images loaded, animations done)
-                st2 = classify(img2, self.layout) if img2 is not None else None
-                if st2 is not None and st2.kind == "grid" and not st2.error and _steady(img, img2):
+                img2 = self.snap(0.7)
+                if img2 is not None and _steady(img, img2):
+                    try:
+                        st2 = _grid_state(img2)
+                    except GridNotFound:
+                        continue
                     self.save("page_grid", img2)
                     return img2, st2
                 continue
-            if st.kind in PAGES:
-                if cfg.dry_run:
-                    raise RunError(f"Page is '{st.kind}', not the grid; --dry-run never taps. Open the grid first.")
-                kind, when = last
-                if kind == st.kind and self.clock() - when < cfg.retap_after:
-                    self.sleep(0.7)                  # tapped a moment ago: give the page time
-                    continue
-                if taps.get(st.kind, 0) >= cfg.max_taps_per_page:
-                    raise RunError(f"Tapped the '{st.kind}' page {taps[st.kind]} times and it is still showing. "
-                                   "Check the taught position (./lr captcha --learn-layout).")
-                spot = self.layout.tap(st.kind) if self.layout else None
-                if cfg.training and st.kind == "choice" and self.layout and self.layout.start_tap():
-                    spot = self.layout.start_tap()      # Training page: start a whole session
-                if spot is None:
-                    raise RunError(f"I don't know where to tap on the '{st.kind}' page. "
-                                   "Run ./lr captcha --learn-layout first.")
-                self.save(f"page_{st.kind}", img)
-                self.tap(*spot, f"on the {st.kind} page")
-                self.home()
-                taps[st.kind] = taps.get(st.kind, 0) + 1
-                last = (st.kind, self.clock())
-                self.sleep(cfg.settle)
+            elif kind in ("loading", "wait"):
+                self.sleep(0.7)
                 continue
-            self.sleep(0.8)                          # unknown: loading, or the page is changing
+            if kind not in PAGES:
+                self.sleep(0.8)                      # unknown: loading, or the page is changing
+                continue
+            if cfg.dry_run:
+                raise RunError(f"Page is '{kind}', not the grid; --dry-run never taps. Open the grid first.")
+            k0, when = last
+            if k0 == kind and self.clock() - when < cfg.retap_after:
+                self.sleep(0.7)                      # tapped a moment ago: give the page time
+                continue
+            if taps.get(kind, 0) >= cfg.max_taps_per_page:
+                raise RunError(f"Tapped the '{kind}' page {taps[kind]} times and it is still showing. "
+                               + ("The tap is probably missing the button (check the aim: ./lr practice --web)."
+                                  if self.web is not None else "Check the taught position (./lr captcha --learn-layout)."))
+            if spot is None:
+                raise RunError(f"I don't know where to tap on the '{kind}' page. "
+                               "Run ./lr captcha --learn-layout first (or use the robot link: --web).")
+            self.save(f"page_{kind}", img)
+            self.tap(*spot, why)
+            self.home()
+            taps[kind] = taps.get(kind, 0) + 1
+            last = (kind, self.clock())
+            self.sleep(cfg.settle)
         raise RunError(f"The grid did not appear within {cfg.page_timeout:.0f} s.")
+
+    def _site_page(self, img):
+        """(kind, (u, v) to tap, description) from the site itself, or (None, None, None) without the link."""
+        if self.web is None:
+            return None, None, None
+        site = self.web.page()
+        if site is None:
+            return None, None, None
+        kind = site.get("kind")
+        tg = lambda n: self.web.target(site, n)  # noqa: E731
+        if not site.get("fullscreen") and not getattr(self, "_warned_fs", False):
+            self._warned_fs = True
+            self.say("   note: the site is not full-screen; taps may land off (calibration assumes full-screen)")
+        if kind == "choice":
+            start, card = tg("start"), tg("card")
+            spot, why = ((start, "on 'Start session'") if self.cfg.training and start else (card, "on the reCAPTCHA card"))
+            self._learn_page("choice", img, card, start)
+        elif kind == "checkbox":
+            spot, why = tg("checkbox"), "on 'I'm not a robot'"
+            self._learn_page("checkbox", img, spot)
+        elif kind == "verified":
+            spot, why = tg("restart"), "on 'Start again'"
+            self._learn_page("verified", img, spot)
+        elif kind in ("grid", "loading"):
+            return kind, None, None
+        else:
+            return None, None, None              # other / slider: let the camera decide
+        self.say(f"   page (site): {kind}")
+        return kind, spot, why
+
+    def _learn_page(self, kind, img, tap, start=None):
+        """Remember what this page looks like on camera (and where to tap), once per run, for runs without the link."""
+        if self.layout is None or tap is None or kind in getattr(self, "_learned_pages", set()):
+            return
+        self._learned_pages = getattr(self, "_learned_pages", set()) | {kind}
+        try:
+            self.layout.teach(kind, img, tap)
+            if start is not None:
+                self.layout.pages[kind]["start"] = [round(start[0], 5), round(start[1], 5)]
+            self.layout.save()
+            self.say(f"   learned the '{kind}' page from the site (camera signature + tap spot saved)")
+        except Exception as e:  # never stop a run over this
+            self.say(f"   (could not save the '{kind}' page: {e})")
 
     # ------------------------------------------------------------------ 2. ask the solver
     def ask_solver(self, img, state):
@@ -479,10 +557,10 @@ def main():
         return
 
     layout = SiteLayout.load(a.layout)
-    if not layout.pages:
+    if not layout.pages and not a.web:
         print("note: no taught pages yet (./lr captcha --learn-layout). Fine if the grid is already open; "
               "otherwise the robot can't tap the choice page / checkbox.")
-    elif layout.missing():
+    elif layout.missing() and not a.web:
         print(f"note: pages not taught yet: {', '.join(layout.missing())}")
 
     from solve import solve_screen, solver_config
@@ -500,7 +578,7 @@ def main():
     cfg = Config(count=a.count, tries=a.tries, max_fix=a.max_fix, verify_retries=a.verify_retries,
                  target=a.target, model=a.model, dry_run=a.dry_run,
                  stop_on_fail=not (a.continue_on_fail or a.training), size=(w, h), training=a.training)
-    if a.training and layout.start_tap() is None:
+    if a.training and not a.web and layout.start_tap() is None:
         print("note: 'Start session' not taught (./lr captcha --learn-layout --only start): on the Training page "
               "the robot taps the single-challenge card instead.")
     web = None

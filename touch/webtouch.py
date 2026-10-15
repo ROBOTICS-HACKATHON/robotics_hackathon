@@ -19,12 +19,14 @@ import urllib.request
 
 
 class WebTouches:
-    def __init__(self, base=None, key=None, poll=0.15, accept_mouse=False, **state):
+    def __init__(self, base=None, key=None, poll=0.2, idle_poll=1.0, accept_mouse=False, **state):
         self.base = (base or os.environ.get("TOUCH_WEB", "")).rstrip("/")
         self.key = key or os.environ.get("ROBOT_KEY", "")
         if not self.base or not self.key:
             raise SystemExit("Robot link needs TOUCH_WEB and ROBOT_KEY (lr.conf).")
-        self.poll, self.accept_mouse = poll, accept_mouse
+        # poll fast only around taps / while waiting for a result (Cloudflare's free tier counts requests)
+        self.poll, self.idle_poll, self.accept_mouse = poll, idle_poll, accept_mouse
+        self._fast_until = 0.0
         self.touches = queue.Queue()      # dicts: u, v, w, h, t, el, page, challenge
         self.results = queue.Queue()      # dicts: state (pass|fail), challenge, t
         self.keys = queue.Queue()         # (TouchServer compatibility; the site has no Enter key)
@@ -73,7 +75,10 @@ class WebTouches:
                 if time.time() - self._warned > 10:
                     print(f"   (robot link: {type(e).__name__}: {e}; retrying)", flush=True)
                     self._warned = time.time()
-            self._stop.wait(self.poll)
+            self._stop.wait(self.poll if time.time() < self._fast_until else self.idle_poll)
+
+    def _fast(self, seconds):
+        self._fast_until = max(self._fast_until, time.time() + seconds)
 
     def _take(self, ev):
         now = time.time()
@@ -95,6 +100,7 @@ class WebTouches:
         self._state_dirty.set()
 
     def drain(self):
+        self._fast(6)
         self.touched.clear()
         while not self.touches.empty():
             self.touches.get_nowait()
@@ -103,6 +109,7 @@ class WebTouches:
         """Touches since the last drain. The site needs a moment (page -> Cloudflare -> here), so wait up to
         `wait` s for the first one, then `extra` s for any more (a bounce or drag gives two)."""
         end = time.time() + wait
+        self._fast(wait + 1)
         while self.touches.empty() and time.time() < end:
             time.sleep(0.05)
         if not self.touches.empty():
@@ -113,6 +120,7 @@ class WebTouches:
         return out
 
     def drain_results(self):
+        self._fast(60)
         while not self.results.empty():
             self.results.get_nowait()
 
@@ -122,6 +130,21 @@ class WebTouches:
             return self.results.get(timeout=timeout) if timeout > 0 else self.results.get_nowait()
         except queue.Empty:
             return None
+
+    def page(self, max_age=15.0):
+        """What the site shows right now: {"kind": choice|checkbox|loading|grid|slider|verified|other,
+        "targets": {name: [u, v, w, h]}, ...}, or None if the page hasn't reported lately."""
+        try:
+            d = self._req("/api/page")
+        except Exception:
+            return None
+        if d.get("age") is None or d["age"] > max_age or not d.get("kind"):
+            return None
+        return d
+
+    def target(self, page, name):
+        t = (page or {}).get("targets", {}).get(name)
+        return (float(t[0]), float(t[1])) if t else None
 
     def stop(self):
         try:
@@ -138,6 +161,11 @@ if __name__ == "__main__":   # quick check:  python webtouch.py   (touch the scr
         while True:
             for t in w.all_touches(wait=1.0):
                 print(f"  touch u={t['u']:.3f} v={t['v']:.3f}  on {t['el'] or '-'}  ({t['page']})")
+            pg = w.page()
+            if pg and pg.get("kind") != getattr(w, "_last_kind", None):
+                w._last_kind = pg["kind"]
+                print(f"  screen: {pg['kind']}  buttons: " + ", ".join(
+                    f"{k} at ({v[0]:.3f}, {v[1]:.3f})" for k, v in pg.get("targets", {}).items() if v))
             r = w.result()
             if r:
                 print(f"  result: {r['state'].upper()}  {r['challenge'] or ''}")

@@ -48,6 +48,46 @@
     send(d);
   }, { capture: true, passive: true });
 
+  // Which screen is showing, and where its buttons are (u, v centres): the robot taps these, so nobody has
+  // to teach it the layout. Sent when something changes, and every 10 s so the robot knows it is fresh.
+  const centre = (sel) => {
+    const el = document.querySelector(sel);
+    if (!el || el.closest('[hidden]')) return null;
+    const r = el.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return null;
+    const w = innerWidth - 2 * INSET, h = innerHeight - 2 * INSET;
+    return [+((r.left + r.width / 2 - INSET) / w).toFixed(4), +((r.top + r.height / 2 - INSET) / h).toFixed(4),
+      +(r.width / w).toFixed(4), +(r.height / h).toFixed(4)];
+  };
+  const screen = () => {
+    const dlg = document.querySelector('dialog[open]');
+    const path = location.pathname;
+    const t = {};
+    let kind = 'other';
+    if (path.startsWith('/verified')) { kind = 'verified'; t.restart = centre('#restart'); }
+    else if (dlg && dlg.dataset.phase === 'checkbox') {
+      kind = 'checkbox'; t.checkbox = centre('#human-checkbox');
+      if (!t.checkbox || document.querySelector('#human-checkbox')?.disabled) kind = 'loading';
+    } else if (dlg && dlg.dataset.phase === 'challenge') {
+      kind = dlg.dataset.kind === 'slider' ? 'slider' : 'grid'; t.verify = centre('.verify-button');
+    } else if (path.startsWith('/training')) {
+      kind = 'choice'; t.start = centre('#start-session'); t.card = centre('.choice[data-challenge="image"]');
+    }
+    return { kind, path, targets: t, w: innerWidth, h: innerHeight, fullscreen: !!document.fullscreenElement,
+      markers: !!document.querySelector('#screen-markers:popover-open'), challenge: challenge() };
+  };
+  let lastScreen = '', lastSent = 0;
+  const report = () => {
+    const s = screen();
+    const j = JSON.stringify(s);
+    if (j === lastScreen && Date.now() - lastSent < 10000) return;
+    lastScreen = j; lastSent = Date.now();
+    fetch('/api/page', { method: 'POST', keepalive: true, headers: { 'content-type': 'application/json', 'x-robot-key': key },
+      body: j }).catch(() => {});
+  };
+  setInterval(report, 400);
+  addEventListener('load', report);
+
   // pass / fail of each challenge, straight from the page (no camera needed to know the result)
   document.addEventListener('challenge-state', (e) => {
     const s = e.detail && e.detail.state;

@@ -102,7 +102,8 @@ bun run build && npx wrangler pages deploy dist --project-name <project> --branc
 
 Robot side, in `lr.conf`: `TOUCH_WEB=https://<project>.pages.dev` and `ROBOT_KEY=<key>`. Then:
 
-- `./lr captcha --learn-layout --only start` once: show the Training page, click "Start session" on the photo
+- No layout teaching needed: the page reports which screen it shows and where its buttons are (`/api/page`);
+  the robot taps those and saves each page's camera look for runs without the link
 - `./lr captcha-train --count 50`: starts sessions itself, solves, keeps going after wrong answers, learns from every tap
 - `./lr practice --web`: arm practice on `<site>/practice/`
 - `python touch/webtouch.py` (with the two variables set) prints touches and results live: a quick link test

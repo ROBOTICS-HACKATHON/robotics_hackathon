@@ -4,6 +4,8 @@
 //   GET  /api/touches   the robot reads them: ?after=<id>                (needs the robot key)
 //   GET  /api/state     the practice page reads the robot's current target / message
 //   POST /api/state     the robot sets it                                (needs the robot key)
+//   POST /api/page      the page says which screen it shows and where its buttons are (needs the robot key)
+//   GET  /api/page      the robot reads that, so it never has to be taught the layout  (needs the robot key)
 //
 // Setup (once): a D1 database bound as DB, and a secret ROBOT_KEY. See captcha/README.md "Robot link".
 // Without them the site works as before and these endpoints answer 503.
@@ -69,6 +71,21 @@ export const onRequest = async ({ request, env, params }: { request: Request; en
     const d = await request.text();
     if (d.length > 4000) return json({ error: 'too big' }, 413);
     await env.DB.prepare("INSERT INTO robot_state (k, v, ts) VALUES ('state', ?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v, ts = excluded.ts")
+      .bind(d || '{}', now).run();
+    return json({ ok: true });
+  }
+
+  if (route === 'page' && request.method === 'GET') {
+    if (!authed) return json({ error: 'bad key' }, 401);
+    const row = await env.DB.prepare("SELECT v, ts FROM robot_state WHERE k = 'page'").first();
+    return json({ ...(row ? JSON.parse(row.v) : {}), age: row ? now - row.ts : null });
+  }
+
+  if (route === 'page' && request.method === 'POST') {
+    if (!authed) return json({ error: 'bad key' }, 401);
+    const d = await request.text();
+    if (d.length > 4000) return json({ error: 'too big' }, 413);
+    await env.DB.prepare("INSERT INTO robot_state (k, v, ts) VALUES ('page', ?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v, ts = excluded.ts")
       .bind(d || '{}', now).run();
     return json({ ok: true });
   }

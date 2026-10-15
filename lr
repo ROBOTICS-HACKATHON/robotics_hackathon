@@ -461,7 +461,7 @@ Touch screen
                             (--learn-layout teaches the choice/checkbox pages once; --dry-run = camera + solver, no arm;
                              --web = robot link: the site reports pass/fail and where each tap landed, and it learns)
   captcha-train [--count N] Training on the real site (robot link): starts sessions by itself, keeps going after
-                            wrong answers, learns from every tap (teach 'Start session' once: --learn-layout --only start)
+                            wrong answers, learns from every tap; no layout teaching needed
   practice --web            Practice on <TOUCH_WEB>/practice/ instead of the local calib page
   tip-live                  Live browser view of both cameras + tip height in mm (no arm needed)
                             (save photos, click the pen tip to teach its colour)
