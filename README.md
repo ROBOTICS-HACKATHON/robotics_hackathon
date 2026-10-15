@@ -57,10 +57,7 @@ could be swapped for anything else that outputs `u, v`.
 
 ### 1. The website (`captcha/`)
 
-An [Astro](https://astro.build) site, deployed as static files on Cloudflare Pages. The main page is a Minesweeper board
-that, after two seconds, opens a "verify you are human" check. The check can be a reCAPTCHA-style checkbox that opens a
-**3×3 photo grid** ("select all images with bicycles" + Verify), a slider puzzle, or a Turnstile-style single checkbox.
-Solving it navigates to a "verified" page.
+An [Astro](https://astro.build) site, deployed as static files on Cloudflare Pages.
 
 - `/training/` has the challenge picker: 400 photo puzzles (200 grids, 200 sliders), a train/test split (80/20 by
   default) and sessions of 100 tasks in a row for repeatable runs. We only support solving the grids at the moment.
@@ -225,18 +222,16 @@ Here is one target from `results`, shortened:
 <p align="center">
   <img src="media/autonomous_training_result_100_attempts.webp" width="80%" alt="The touch page after the practice run: blue dots mark every touch the page registered, over the nine calibration targets and the four corner markers">
 </p>
-
 The heatmap colours each zone by how hard it was (green is accurate, red is hard). The picture above is the touch page
-after practising: blue dots are touches the page registered, the pink rings are the nine calibration targets.
+after practising: blue dots are touches the page registered, the orange rings are the nine calibration targets.
 
 Read from the log (computed from `training_logs.json`):
 
 - **70 of 100 targets reached the 15 px tolerance**, in 343 attempts (3.4 tries on average). Of those 70, 14 were hit on the
   first try, 18 on the second, 19 on the third, 9 on the fourth and 10 on the fifth.
 - **The feedback loop works. First-try accuracy did not visibly improve in this run.** The average first-try miss was 40 px
-  (median 34 px): 36 px over the first 50 targets and 44 px over the last 50, which is flat or slightly worse. So the
-  retry-from-the-page's-report part pays off, but the learned model has not yet made *first* tries better. We don't know
-  why yet, and have not tried a longer run or more targets per zone to find out.
+  (median 34 px). So the
+  retry-from-the-page's-report part pays off, but the learned model has not yet made *first* tries better. This requires more testing. A possible solution could be a longer run or more targets per zone to find out.
 - **Zone 8 (bottom centre) is best** at 18 px first try and a 50% hit rate, but it had only 11 attempts, so that is thin
   evidence. Zone 3 (top right) is the worst at 51 px. No zone's hit rate on the first try is above 50%.
 - **The bandit leaned towards pressing deeper.** Of the 343 attempts, 155 used the deepest option (0.1) and 96 used 0.07,
