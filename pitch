@@ -1,0 +1,32 @@
+Self learning bot that is not a bot
+We have created a bot that can solve capchas on its own.
+Here we have example of how it's solving capcha.
+
+It works by taking screenshot of 
+our cloudflare hosted website of capchas. 
+Which is passed to cloudflare worker with gema 4
+that gives it back where on the screen should it tap.
+It repeate the proccess after each click by the arm on the screen.
+until It solve the capcha. AI worker can also check which pictures are 
+selected and if incoret one is selected it will send command to be deselected.
+But how did we get it from coordinate to robot clicking on the screen
+
+Generaly when robots are trained you have to repeat the same task at least 50 tinmes
+which can be used on training the model. 
+We took different selflearning aproach. 
+
+The only imput we do is help the robot find 9 areas on the screen. 
+Than we start it's self learnig journey. We have circles which it should touch
+it has mutliple atempts to touch tham. After each unsusssfull atempt it knows how to improve.
+
+Longer this trainig the better it gets. 
+
+Our current aproach can work on any  2d space. The only thing it need is to recieve
+coordinates of the screen. And the best part if anything changes 
+it can teach it self with minimal human intervention.
+
+This can be improved where we would teach the robot in 3d space. We had system of cameras
+that knew where it is and we can reward it.
+
+We created a bot which can do anytyhin on a screen.
+And with bit of finetuning we can do anything on any 2d plain.
