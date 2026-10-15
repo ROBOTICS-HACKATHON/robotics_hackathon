@@ -334,6 +334,7 @@ class Run:
         self.tap(vp["x_norm"], vp["y_norm"], "VERIFY")
         # with the robot link we know where that tap landed: missed the button (or no touch) -> tap it again now,
         # instead of waiting for an answer that can't come
+        u2, v2 = vp["x_norm"], vp["y_norm"]
         for extra in range(2):
             rec = (getattr(self.arm, "taps", None) or [None])[-1] if isinstance(self.arm, LearningArm) else None
             if not isinstance(rec, dict) or rec.get("skipped"):
@@ -341,8 +342,12 @@ class Run:
             el = rec.get("el") or ""
             if rec.get("touches") and "verify" in el:
                 break
-            self.say(f"   Verify missed ({'landed on ' + el if rec.get('touches') else 'no touch'}): tapping it again")
-            self.tap(vp["x_norm"], vp["y_norm"], "VERIFY again")
+            if rec.get("miss_uv"):              # it landed off by (du, dv): aim that much the other way
+                u2 = min(max(u2 - rec["miss_uv"][0], 0.0), 1.0)
+                v2 = min(max(v2 - rec["miss_uv"][1], 0.0), 1.0)
+            self.say(f"   Verify missed ({'landed on ' + el if rec.get('touches') else 'no touch'}): tapping it again, "
+                     "aim corrected by the miss")
+            self.tap(u2, v2, "VERIFY again")
         self.home()
 
     # ------------------------------------------------------------------ 7. the site's answer
@@ -541,8 +546,13 @@ class LearningArm:
                 t.exp.add(t.last_touch_q, (g["u"], g["v"]), (u, v), r, t.press,
                           {"src": "captcha", "err_px": err, "el": g.get("el")})
             rec["miss_px"] = [round((g["u"] - u) * w, 1), round((g["v"] - v) * h, 1)]
+            rec["miss_uv"] = [g["u"] - u, g["v"] - v]
+            clicks = self.web.take_clicks()
+            rec["clicked"] = clicks
+            hit = g.get("el") or ""
             self.say(f"      landed {err:4.0f}px from the aim ({rec['miss_px'][0]:+.0f} right, {rec['miss_px'][1]:+.0f} down)"
-                     + (f" on {g['el']}" if g.get("el") else ""))
+                     + (f" on {hit}" if hit else "")
+                     + (f", clicked {', '.join(clicks)}" if clicks else ", NO click (touched but the page didn't count it)"))
         elif self.web.errors:
             rec.update(reward=None, skipped="robot link down")
             self.say("      (robot link down: don't know if it touched; not learned from)")

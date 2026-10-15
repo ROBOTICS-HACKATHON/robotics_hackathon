@@ -29,6 +29,7 @@ class WebTouches:
         self._fast_until = 0.0
         self.touches = queue.Queue()      # dicts: u, v, w, h, t, el, page, challenge
         self.results = queue.Queue()      # dicts: state (pass|fail), challenge, t
+        self.clicks = queue.Queue()       # elements the page actually clicked (a touch isn't always a click)
         self.keys = queue.Queue()         # (TouchServer compatibility; the site has no Enter key)
         self.touched = threading.Event()
         self.state = {"msg": "", **state}
@@ -92,6 +93,8 @@ class WebTouches:
                               "challenge": ev.get("challenge"), "id": ev["id"],
                               "fullscreen": ev.get("state") != "window"})
             self.touched.set()
+        elif ev["type"] == "result" and ev.get("state") == "click":
+            self.clicks.put({"el": ev.get("el"), "t": now, "id": ev["id"]})
         elif ev["type"] == "result":
             self.results.put({"state": ev.get("state"), "challenge": ev.get("challenge"), "t": now, "id": ev["id"]})
 
@@ -103,6 +106,8 @@ class WebTouches:
     def drain(self):
         self._fast(6)
         self.touched.clear()
+        while not self.clicks.empty():
+            self.clicks.get_nowait()
         while not self.touches.empty():
             self.touches.get_nowait()
 
@@ -118,6 +123,14 @@ class WebTouches:
         out = []
         while not self.touches.empty():
             out.append(self.touches.get_nowait())
+        return out
+
+    def take_clicks(self, wait=0.4):
+        """Clicks the page reported since the last drain (waits a moment: they come right after the touch)."""
+        time.sleep(wait)
+        out = []
+        while not self.clicks.empty():
+            out.append(self.clicks.get_nowait()["el"])
         return out
 
     def drain_results(self):
@@ -167,6 +180,8 @@ if __name__ == "__main__":   # quick check:  python webtouch.py   (touch the scr
                 w._last_kind = pg["kind"]
                 print(f"  screen: {pg['kind']}  buttons: " + ", ".join(
                     f"{k} at ({v[0]:.3f}, {v[1]:.3f})" for k, v in pg.get("targets", {}).items() if v))
+            for c in w.take_clicks(0):
+                print(f"  click on {c}")
             r = w.result()
             if r:
                 print(f"  result: {r['state'].upper()}  {r['challenge'] or ''}")

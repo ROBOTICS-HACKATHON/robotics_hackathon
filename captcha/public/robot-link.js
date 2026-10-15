@@ -100,6 +100,12 @@
   setInterval(report, 400);
   addEventListener('load', report);
 
+  // Did the touch become a click? (a touch can land on a button and still not click it: press-and-hold,
+  // a drag, a bounce). Reported so the robot can tell "missed" from "hit but didn't count".
+  document.addEventListener('click', (e) => {
+    send({ type: 'result', state: 'click', el: describe(e.target), page: location.pathname, phase: phase(), challenge: challenge() });
+  });
+
   // pass / fail of each challenge, straight from the page (no camera needed to know the result)
   document.addEventListener('challenge-state', (e) => {
     const s = e.detail && e.detail.state;
