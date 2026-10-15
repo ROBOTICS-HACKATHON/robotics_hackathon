@@ -21,6 +21,7 @@ const { demo = false } = Astro.props;
     <label class="challenge-option" for="challenge-number">Challenge<select id="challenge-number"><option value="random">Random</option>{(['image', 'slider'] as const).map((kind) => <optgroup label={kind === 'image' ? 'Image grid' : 'Slider'}>{trainingCatalog.filter((entry) => entry.kind === kind).map((entry) => <option value={`${entry.kind}:${entry.index}`}>{entry.id}</option>)}</optgroup>)}</select></label>
     <label class="fullscreen-option"><input type="checkbox" id="fullscreen" checked /> Open fullscreen</label>
     <label class="fullscreen-option"><input type="checkbox" id="high-contrast" /> High contrast</label>
+    <label class="fullscreen-option"><input type="checkbox" id="robot-size" checked /> Large for robots</label>
     <label class="fullscreen-option"><input type="checkbox" id="training-overlay-toggle" /> Training overlay</label>
     <label class="fullscreen-option"><input type="checkbox" id="screen-markers-toggle" /> Camera markers</label>
     <p id="screen-markers-status" class="muted" role="status" hidden></p>
@@ -195,6 +196,25 @@ const { demo = false } = Astro.props;
         savePreference('local', 'captcha-contrast', mode);
       });
     }
+    // "Large for robots": scale the checkbox step and the challenge as big as the screen allows (max 2.2x).
+    // CSS zoom (not transform) so the fixed-position progress/feedback bars stay where they are.
+    // Measure at zoom 1, then set the zoom in one go (no ResizeObserver loop: the final size doesn't change).
+    const robotSize = document.querySelector<HTMLInputElement>('#robot-size');
+    function fitDialog(): void {
+      if (!dialog) return;
+      if (robotSize && !robotSize.checked) { dialog.style.setProperty('--robot-scale', '1'); return; }
+      dialog.style.setProperty('--robot-scale', '1');
+      const w = dialog.offsetWidth, h = dialog.offsetHeight;
+      if (!w || !h) return;
+      const s = Math.max(1, Math.min(2.2, (0.92 * window.innerWidth) / w, (0.96 * window.innerHeight) / (h + 36)));
+      dialog.style.setProperty('--robot-scale', s.toFixed(3));
+    }
+    if (robotSize) {
+      robotSize.checked = readPreference('local', 'captcha-robot-size') !== 'off';
+      robotSize.addEventListener('change', () => { savePreference('local', 'captcha-robot-size', robotSize.checked ? 'on' : 'off'); fitDialog(); });
+    }
+    if (dialog && 'ResizeObserver' in window) new ResizeObserver(() => fitDialog()).observe(dialog);
+    window.addEventListener('resize', fitDialog);
     if (challengeNumber) {
       const savedSelection = readPreference('session', 'captcha-challenge-selection') ?? 'random';
       if (savedSelection === 'random' || trainingCatalog.some((entry) => `${entry.kind}:${entry.index}` === savedSelection)) challengeNumber.value = savedSelection;
@@ -496,6 +516,9 @@ const { demo = false } = Astro.props;
     .training-settings select { min-width: 130px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 3px; background: #fff; color: var(--text); }
     .demo-note { margin-top: 40px; font-size: .8rem; }
     #fullscreen-status { font-size: .8rem; }
+    /* "Large for robots": the whole dialog is scaled up (same proportions, so camera/solver checks still hold) */
+    dialog { zoom: var(--robot-scale, 1); }
+    #session-progress, #browser-feedback { zoom: calc(1 / var(--robot-scale, 1)); }
     dialog { width: min(400px, calc(100% - 32px)); max-height: calc(100dvh - 64px); padding: 0; border: 1px solid #ccc; border-radius: 3px; background: #fff; color: #111; font-family: Arial, sans-serif; overflow: visible; }
     dialog[data-phase='checkbox'] { width: 304px; border: 0; background: transparent; }
     dialog[data-phase='checkbox'][data-kind='turnstile'] { width: 300px; }
