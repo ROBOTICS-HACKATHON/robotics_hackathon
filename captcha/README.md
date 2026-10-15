@@ -25,6 +25,11 @@ top-left, 1 at top-right, 2 at bottom-right, and 3 at bottom-left. Use fullscree
 with the same screen and arm placement as `./lr touch-calib`; `./lr see` then
 straightens the rectangle between their outer corners for calibrated `(u, v)` taps.
 
+Touch input is built for a stylus that wobbles: the page never scrolls, pans or zooms on a touch drag, and a touch that
+starts on a button, checkbox or tile and drifts (up to 150 px) still counts as a tap on it, because browsers otherwise drop the
+click once a touch moves more than about 10-15 px. The slider still drags normally and mouse input is unchanged.
+Both are in `src/styles/global.css` and `src/layouts/Page.astro`.
+
 Choose one of 400 photo puzzles (200 image grids and 200 sliders), or the checkbox-only
 Turnstile mock. Then click the verification checkbox. The challenge
 opens over a blurred page. "Open fullscreen" uses browser fullscreen when available.

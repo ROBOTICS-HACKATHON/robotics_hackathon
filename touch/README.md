@@ -1,7 +1,7 @@
 # Touch screen: arm taps CAPTCHA answers
 
 ```
-camera ──► ./lr see ──► straightened screenshot ──► agent picks tiles (u, v) ──► ./lr tap u v ...
+screenshot (or camera) ──► ./lr see ──► straightened screenshot ──► solver picks tiles (u, v) ──► ./lr tap u v ...
 ```
 
 Positions on the screen are always **u, v from 0 to 1**: u goes left to right, v goes top to bottom. They're measured between the outer corners of the 4 black markers.
@@ -10,7 +10,12 @@ Positions on the screen are always **u, v from 0 to 1**: u goes left to right, v
 
 1. **Stylus:** fix a **capacitive stylus** in the gripper (rubber or mesh tip; tape it so it can't slip). A plastic gripper tip won't register on a touch screen.
 2. **Fix everything down:** tape the arm base and the screen to the table. If either one moves, redo step 4.
-3. **Camera (any device):** it only has to see the whole screen with all 4 corner markers, no glare.
+3. **Screen source.** Simplest, and what the demo uses: a **screenshot** of the computer that shows the page. Run
+   `touch/screencap.ps1` in a Windows PowerShell window and leave it open (`powershell -ExecutionPolicy Bypass -File
+   "$HOME\Downloads\screencap.ps1"`); it saves the screen about 4 times a second to `outputs/screen_live.jpg`. Set
+   `CAMERA=screen` in `lr.conf`; `./lr` then stops with a message if that picture is more than 3 s old. The 4 markers
+   tell `see` where the page is in the screenshot. Check with `./lr see`.
+   **Or a camera (any device):** it only has to see the whole screen with all 4 corner markers, no glare.
    Position, angle, resolution don't matter and nothing is calibrated to it, so you can swap cameras or
    share one with another team. With a **phone**: install *IP Webcam* (Android) or *DroidCam*
    (Android/iOS), put the phone on the same Wi-Fi, start the camera in the app, note the address it shows,
@@ -46,7 +51,9 @@ Positions on the screen are always **u, v from 0 to 1**: u goes left to right, v
 For each target it taps, sees where it landed, corrects its **joint pose** and retries until it is within
 `--tol` pixels, then moves on. Every touch becomes experience (`touch/experience.json`, per calibration):
 the arm's model of "which joint angles hit (u, v)" is refit from all of it, with nearby examples weighted most,
-so **first tries keep getting better**. Each attempt also gets a reward (accuracy, minus penalties for no
+so first tries should get better. (In our 100-target run on the real arm they did not: the first-try miss averaged 40 px, 36 px over
+the first 50 targets and 44 px over the last 50; what worked was the retry, 70 of 100 targets reached 15 px. See the main README.)
+Each attempt also gets a reward (accuracy, minus penalties for no
 touch, double touches or force stops) that tunes how deep it presses. The report shows the learning curve.
 With 2 cameras (`VISION=auto`), a tap that doesn't register is measured too: the cameras see how far above
 the glass the tip stopped. A near miss (say 2 mm short) scores much better than 15 mm short, so each zone's
@@ -123,9 +130,9 @@ The live page also has:
   arm stops pressing right then and lifts off. No pushing after contact.
 - **Force guard (OFF by default: it misread normal arm movement as pushing; enable with `--max-load 300`
   only after checking `peak_load_jump` in the test logs):** the motors report how hard they work. When the stylus pushes into the
-  glass that load jumps, and the arm immediately stops pushing and lifts off. During calibration the
-  follower stops following the leader deeper ("too much force" message). Tune with `--max-load`
-  (lower = gentler, default 200 for taps; `0` turns it off). Test logs record `peak_load_jump` for each tap,
+  glass that load jumps, and the arm immediately stops pushing and lifts off. When it is on, the follower also
+  stops following the leader deeper during calibration ("too much force" message). Tune with `--max-load`
+  (lower = gentler; the default is `0` = off everywhere, `lr` does not pass it). Test logs record `peak_load_jump` for each tap,
   so you can see how hard real taps push.
 - **Optional strength cap:** `./lr tap --torque 60 ...` limits shoulder/elbow/wrist to 60% while tapping.
   Too low and the arm can't hold itself up: lower it step by step and watch.
@@ -175,12 +182,12 @@ The arm covers the screen while tapping, so call `see` **before** tapping, with 
 see -> page? -> choice/checkbox: tap | grid: solver API -> tap tiles -> see: right tiles? -> Verify -> see: pass/fail
 ```
 
-Site: `https://skibidisigma67rizz.pages.dev/`, solver: `https://captchasolver.alvaro-camposmndz.workers.dev/` (`POST /api/robot/solve`).
+Site: `https://robot-captcha-demo.pages.dev/training/` (the page with the three challenge cards), solver: `https://captchasolver.alvaro-camposmndz.workers.dev/` (`POST /api/robot/solve`).
 
 **One-time setup**
 
 1. `lr.conf`: set `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` (a Workers AI token of yours; never commit it). `SOLVER_URL` is preset.
-2. On the site tick **Camera markers** (off by default; the camera needs them) and open it full-screen on the touch screen.
+2. On the site tick **Camera markers** (off by default; `see` needs them to find the page) and open it full-screen on the touch screen.
 3. Calibrate the arm (`./lr touch-calib`, optionally `./lr practice`).
 4. `./lr captcha --learn-layout`: show the choice page, the "I'm not a robot" box and the "Access granted" page, one after the other.
    For each, the camera takes a photo and you click on it (browser, `http://localhost:8765/`) where the robot must tap.
@@ -230,9 +237,12 @@ Every run saves its photos, the solver's answer, the plan and the result in `out
 - Only the image grid (reCAPTCHA card) is handled. The slider needs a drag; Turnstile is a single checkbox tap and is not wired in yet.
 - Stop-on-touch is not available here (the site doesn't report touches to us); the arm relies on its calibration.
 
-**Offline tests** (no robot, no network): `.venv/bin/python -m pytest touch/tests -q`. They run the loop against real screenshots
-of the site (`touch/tests/shots/`, regenerate with `touch/tests/capture_site.py`). `SITE_E2E=1 ... pytest touch/tests/test_e2e_site.py`
-runs the loop against the live site in a headless browser (a mouse click stands in for the arm).
+**Offline tests** (no robot, no network): `.venv/bin/python -m pytest touch/tests -q`. They run the loop against saved screenshots
+of the site (`touch/tests/shots/`, regenerate with `touch/tests/capture_site.py`). **Those screenshots show an earlier design of the site**
+(no header bar, a page called "Access website"); the current page sits about 78 px lower, so the page classifier says "unknown" on it.
+`SITE_E2E=1 ... pytest touch/tests/test_e2e_site.py` runs the loop against the live site in a headless browser (a mouse click stands in for
+the arm, the solver is faked); it currently fails at the first page for that reason, until the shots are re-captured. Also re-teach the
+robot's pages (`./lr captcha --learn-layout`) if they were taught on the old look.
 
 ## Tuning
 

@@ -19,7 +19,7 @@ import cv2
 import numpy as np
 from playwright.sync_api import sync_playwright
 
-URL = os.environ.get("SITE_URL", "https://skibidisigma67rizz.pages.dev/")
+URL = os.environ.get("SITE_URL", "https://robot-captcha-demo.pages.dev/training/")
 OUT = Path(__file__).resolve().parent / "shots"
 W, H = 1280, 800
 MARKER_INSET = 18  # the site draws the markers 18 px from the viewport corners

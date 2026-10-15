@@ -76,6 +76,7 @@ captchasolver test --count 10
 | `captchasolver serve` | Web UI + HTTP API on localhost (`pip install -e '.[server]'`). See below. |
 
 `web`, `probe`, `test`, `compare`, `replay` and `serve` also exist as standalone `captchasolver-<name>` commands.
+The test runner opens the demo site's `/training/` page (its challenge picker), the default `--url`; the site's root is a Minesweeper page.
 
 ### Output
 
@@ -225,18 +226,19 @@ Things to know:
   people use the same URL, so treat it like any shared site.
 - One container instance serves everyone and sleeps after 30 idle minutes. The first request after that
   takes a few seconds, and results held in memory are gone (by design: nothing is stored).
-- Set `ALLOWED_TEST_HOSTS` (comma-separated) in `wrangler.jsonc` if the demo site moves.
+- Set `ALLOWED_TEST_HOSTS` (comma-separated) in `wrangler.jsonc` if the demo site moves. It is applied when you deploy, so a Worker already
+  running keeps its old list until `npx wrangler deploy` is run again (`GET /api/health` shows `allowed_hosts`).
 - `npx wrangler dev` runs it locally (needs Docker). Copy `.dev.vars.example` to `.dev.vars` to skip
   login locally. **Never deploy with `ALLOW_UNAUTHENTICATED_DEV=true`.**
 - Worker tests: `npm test` and `npm run typecheck`.
 
-## Robot flow: camera photo in, press positions out
+## Robot flow: screenshot in, press positions out
 
 ```
-camera photo ─► (you) straighten to the screen's size ─► POST /api/robot/solve ─► presses[] ─► robot presses them
+screenshot (or camera photo) ─► (you) cut out the page, straighten to the screen's size ─► POST /api/robot/solve ─► presses[] ─► robot presses them
 ```
 
-Your side straightens the photo (finds the screen's corners and warps it to the screen's width and height).
+Your side straightens the image: the robot's `touch/see.py` finds the page by its 4 corner markers in a screenshot (or a camera photo) and warps it to a fixed size.
 `POST /api/robot/solve` takes that image and returns the positions to press **in screen pixels**: the
 tiles first, then Verify. It is not rate limited.
 
@@ -275,6 +277,7 @@ curl -X POST "$URL/api/robot/solve" \
 
 ### How it copes with a photo of a screen
 
+The robot normally sends clean screenshots; this section is about photographing a screen with a camera instead.
 The dialog finder adapts to the photo (it does not look for an exact colour), removes up to 10° of tilt
 (positions are mapped back to your photo), and **refuses instead of guessing** whenever the geometry does
 not add up: banner and Verify must sit where the dialog's proportions say. Measured on simulated camera
@@ -362,7 +365,7 @@ examples/      1.png reference screenshot; generated data is git-ignored
 - Image-grid challenges only. No slider, checkbox/Turnstile or GeeTest solving.
 - Expects the demo site's layout (blue banner, square grid, Verify at the bottom right); the proportions
   are constants in `screen.py`. Other designs need `find_layout` changes.
-- The photo must already be straightened to the screen's size (tilt up to 10° and some perspective skew
+- The image must already be straightened to the screen's size (tilt up to 10° and some perspective skew
   are tolerated; beyond that it refuses).
 - 3×3 grids by default (`--grid RxC` for others); assumes roughly equal tiles.
 - Only the primary monitor is captured.

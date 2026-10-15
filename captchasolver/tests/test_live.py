@@ -53,7 +53,7 @@ async def test_run_recovers_when_chromium_is_killed_mid_run(monkeypatch):
     monkeypatch.setattr(grid, "vlm_query", fake)
     monkeypatch.setattr(screen, "vlm_query", fake)
     notes = []
-    records, summary = await bench.run_tests(bench.DEFAULT_URL if hasattr(bench, "DEFAULT_URL") else "https://skibidisigma67rizz.pages.dev/",
+    records, summary = await bench.run_tests(bench.DEFAULT_URL,
                                              count=6, concurrency=2, fail_images=False, note=notes.append)
     assert killed, "the test never killed anything"
     assert len(records) == 6, "every challenge must produce a result"
@@ -74,7 +74,7 @@ async def test_run_stops_early_and_explains_when_chromium_keeps_dying(monkeypatc
     monkeypatch.setattr(grid, "vlm_query", always_kill)
     monkeypatch.setattr(screen, "vlm_query", always_kill)
     notes, t0 = [], time.perf_counter()
-    records, summary = await bench.run_tests("https://skibidisigma67rizz.pages.dev/", count=12, concurrency=2,
+    records, summary = await bench.run_tests(bench.DEFAULT_URL, count=12, concurrency=2,
                                              fail_images=False, note=notes.append)
     assert time.perf_counter() - t0 < 120, "the run crawled instead of stopping"
     assert len(records) == 12                                          # every challenge is accounted for

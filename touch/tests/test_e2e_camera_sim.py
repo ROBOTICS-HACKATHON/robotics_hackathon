@@ -22,7 +22,7 @@ from fakeworld import IMG, POS, Clock, World
 from run_captcha import Config, Run
 from see import find_screen, straighten
 
-URL = os.environ.get("SITE_URL", "https://skibidisigma67rizz.pages.dev/")
+URL = os.environ.get("SITE_URL", "https://robot-captcha-demo.pages.dev/training/")
 W, H, INSET = 1280, 800, 18
 
 # (camera frame size, where the screen's corners land, blur sigma, brightness, noise sigma)

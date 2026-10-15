@@ -173,7 +173,7 @@ class TestParams(BaseModel):
     viewport: str = "1914x1080"
     dpr: float = Field(1.0, ge=1.0, le=3.0)
     model: str = VLM_MODEL
-    url: str = f"https://{DEFAULT_HOSTS.split(',')[0]}/"
+    url: str = f"https://{DEFAULT_HOSTS.split(',')[0]}/training/"
 
 
 class PreflightParams(BaseModel):

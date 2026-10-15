@@ -2,8 +2,8 @@
 
 Python tool that solves image-grid captchas ("select all images with X") with vision models on
 Cloudflare Workers AI and emits a click script (JSON `actions`) for a robot arm or Playwright.
-Part of a robotics hackathon repo; this directory is self-contained and the rest of the repo
-(LeRobot setup, `lr`, Docker) is unrelated.
+Part of a robotics hackathon repo. The robot code in `../touch` (`solve.py`, `run_captcha.py`) calls `POST /api/robot/solve`, so
+keep that endpoint's shape stable; the rest of the repo (LeRobot setup, `lr`, Docker) does not use this package's code.
 
 ## Scope: do not extend beyond this
 
@@ -33,10 +33,11 @@ No linter is configured. Match the existing style (type hints, short docstrings,
 `screen.build_actions` (tiles first, Verify last). `bench.py` drives the demo site with
 Playwright (`test`, `replay`); `compare.py` ranks models; `capture.py` grabs the screen per platform.
 
-## Robot / camera flow (the product's real input)
+## Robot flow (the product's real input)
 
-Real input is a **photo of the screen**, straightened to screen size by the robot side, sent to
-`POST /api/robot/solve`; the robot presses the returned `presses` (screen px, tiles then Verify).
+Real input is a **screenshot of the screen** (`CAMERA=screen`; the robot side cuts the page out at its 4 corner markers and
+scales it, see `../touch/see.py`), sent to `POST /api/robot/solve`; the robot presses the returned `presses` (tiles then Verify).
+A camera photo of the screen is also supported, which is why the finder must stay camera-tolerant:
 
 - `screen.find_layout`/`locate` must stay camera-tolerant: adaptive blue (blueness vs red/green, threshold
   from the photo), grid top from the strongest edge under the banner, tilt estimated from the banner's top
@@ -103,6 +104,8 @@ Real input is a **photo of the screen**, straightened to screen size by the robo
   `compare` preflight discovers the working variant and caches it in
   `~/.cache/captchasolver/model_config.json` (`CAPTCHASOLVER_CONFIG` overrides). Default model is
   `@cf/google/gemma-4-26b-a4b-it` with thinking off.
+- The test runner's default URL must be the demo site's `/training/` page: the root now is a Minesweeper page without the challenge picker
+  (`#challenge-number`): pointed at the root, a run reports "only 0 challenges available" and tests nothing.
 - The site's Challenge dropdown values are `image:<n>` (they were `0-9` once). The harness reads
   them from the page, never hard-code the list. A session cannot skip a failed challenge, so
   `test` picks challenges itself instead of using the site's Start session.

@@ -23,7 +23,7 @@ import pagestate as ps
 from run_captcha import Config, Run
 from fakeworld import IMG, POS, Clock, World
 
-URL = os.environ.get("SITE_URL", "https://skibidisigma67rizz.pages.dev/")
+URL = os.environ.get("SITE_URL", "https://robot-captcha-demo.pages.dev/training/")
 W, H, INSET = 1280, 800, 18
 
 
