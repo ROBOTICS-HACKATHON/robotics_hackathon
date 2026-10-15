@@ -8,8 +8,19 @@ A robot arm that solves "select all images with…" captchas the way a person wo
 screen, decides which pictures match, and taps them with a stylus** on the touch screen. In the robot's flow nothing is
 clicked by software: the solver only ever sees a screenshot, and the arm only ever touches glass.
 
-We built it at a robotics hackathon (Summit Sprint Hackathon by Austrian Startups, following TU Wien's Robotics Club challenge) with an SO-101 arm (a leader arm we move by hand, a follower arm that
-copies it and holds the stylus) and a team of five.
+### Two ideas carry the project:
+
+- **The arm teaches itself where to press.** You show it the screen once by guiding it to nine dots. After that it
+  practises on its own: it taps a spot, the page reports where the touch really landed, and the arm corrects its joint
+  angles and tries again until it lands within 15 px. Every touch is kept, and the aim model is refit from all of them. In
+  our 100-target run the arm reached 70 targets within 15 px (most of them on the second to fifth try, see [Practice](#2-practice-the-arm-teaches-itself-lr-practice) and
+  [the results](#what-the-100-target-run-gave)).
+- **It is not tied to captchas.** The arm takes a single instruction: "tap at `(u, v)`", a position from 0 to 1 across
+  and down the screen. The captcha solver is just the program that happens to supply those positions here. In principle,
+  any application that can say where on the screen to press could drive the arm instead, for example a different vision
+  model, a test script for a touch app, or a kiosk. We have only built and tested it with our captcha solver.
+
+We built it at a robotics hackathon (Summit Sprint Hackathon by Austrian Startups, following TU Wien's Robotics Club challenge) with an SO-101 arm and a team of five. The SO-101 is a pair: a follower arm that holds the stylus, and a leader arm moved by hand. The follower copies the leader only while we teach it the screen (calibration), when it solves captchas or practises, it moves on its own.
 
 > **These are our own mock captchas.** The site in [`captcha/`](captcha/) is a demo we made for this project. It is not
 > real reCAPTCHA, Turnstile or any other service, and nothing here is meant for anyone else's website.
@@ -39,7 +50,8 @@ flowchart LR
 
 Every position in the system is a pair **`u, v` from 0 to 1** (u left to right, v top to bottom, measured between the
 outer corners of four markers shown on the screen). The screenshot step, the AI and the arm never need to agree on pixels or
-millimetres, only on "40% across, 70% down".
+millimetres, only on "40% across, 70% down". That pair is also the only thing the arm takes as input, so the solver box
+could be swapped for anything else that outputs `u, v`.
 
 ## How one captcha gets solved
 
@@ -113,6 +125,8 @@ A capacitive stylus is fixed in the follower's gripper. The arm knows nothing ab
 - **A tap ([`touch/tap.py`](touch/tap.py)).** Home, then your smoothed path down (slow for the last quarter), a small press,
   wait until the stylus has actually arrived, lift from wherever it really is, home. Going home between taps means the
   stylus never drags across the glass.
+- **Practice (`./lr practice`).** The arm corrects its aim from its own attempts, with the page reporting where each
+  touch landed. See [Training](#2-practice-the-arm-teaches-itself-lr-practice) below.
 - **Safety.** Every joint stays inside the range used in calibration (plus a small margin). A learned correction may differ from the plain
   calibration by at most 8°, and one correction step moves a joint at most 3°. In tests and practice the page reports
   a touch the instant the glass registers it, and the arm stops pressing right then. A motor-load force guard exists
@@ -139,7 +153,8 @@ Only the image grid is handled; the slider needs a drag and Turnstile isn't wire
 
 ## Training
 
-"Training" means four different things in this repo. The demo uses the first two.
+"Training" means several different things in this repo. The demo uses the first two; the last one explains the route we
+didn't take.
 
 ### 1. Teaching by demonstration: calibration
 
@@ -243,27 +258,7 @@ one or two extra cameras, the arm can look at its own tip before it touches
 ([`touch/servo.py`](touch/servo.py)), learning how each joint moves the tip by wiggling it. It's off by default
 (`VISION=off`) and the run above did not use it. Details are in [`touch/README.md`](touch/README.md).
 
-### 4. The imitation-learning route we did not use for the demo
-
-The hackathon's standard recipe is LeRobot imitation learning: teleoperate with the leader arm, **record about 50 episodes**,
-**train a policy** (ACT, a few hours on one GPU), then let the follower run it alone ([`HOWTO.md`](HOWTO.md),
-[`TUWRC_Hackathon_Start_Here.pdf`](TUWRC_Hackathon_Start_Here.pdf)). We set all of that up behind one command:
-
-```bash
-./lr build                                   # one Docker image: CPU (laptop), NVIDIA or AMD ROCm (training machine)
-./lr record pen_in_cup 50 "Put the pen in the cup"
-./lr train  pen_in_cup                       # on the GPU machine
-./lr run    pen_in_cup "Put the pen in the cup"
-```
-
-We started an ACT training on a pen-in-cup dataset on an AMD GPU machine but never confirmed a working policy, and the
-demo doesn't use one. For tapping a screen, calibration plus self-practice was simpler and needs no data collection
-([`PLAN.md`](PLAN.md): "the arm doesn't need AI training for this").
-
-The website's **Training** page is related but different: it hands out tasks and answer labels (train/test split, sessions of
-100). It doesn't record camera frames or robot actions, which a policy would need.
-
-### 5. Training on the real site: the robot link (branch [`mehras-features`](../../tree/mehras-features))
+### 4. Training on the real site: the robot link (branch [`mehras-features`](../../tree/mehras-features))
 
 Practice (2.) happens on a bare page of dots. This trains the arm **while it solves real captchas on the website**, so
 every tap of a real run is also practice. The robot side (`touch/`, `./lr`) is merged into `main`. The website side, a
@@ -305,6 +300,27 @@ python3 touch/webtouch.py                    # link test: prints touches, clicks
 
 Each run saves, per challenge, the screenshots, the solver's answer and `taps.json` (aim, landing spot, miss in pixels,
 what was clicked) in `outputs/train/<time>/`.
+
+### 5. Why not imitation learning?
+
+The hackathon's standard recipe is LeRobot imitation learning: teleoperate with the leader arm, **record about 50 episodes**,
+**train a policy** (ACT, a few hours on one GPU), then let the follower run it alone ([`HOWTO.md`](HOWTO.md),
+[`TUWRC_Hackathon_Start_Here.pdf`](TUWRC_Hackathon_Start_Here.pdf)). We set all of that up behind one command:
+
+```bash
+./lr build                                   # one Docker image: CPU (laptop), NVIDIA or AMD ROCm (training machine)
+./lr record pen_in_cup 50 "Put the pen in the cup"
+./lr train  pen_in_cup                       # on the GPU machine
+./lr run    pen_in_cup "Put the pen in the cup"
+```
+
+For tapping a screen we chose calibration plus self-practice instead: it needs no recorded episodes, and it gets exact
+feedback (the page reports where every touch landed) that a policy trained on camera frames would not use
+([`PLAN.md`](PLAN.md): "the arm doesn't need AI training for this"). The imitation pipeline is still in the repo: we
+started an ACT training on a pen-in-cup dataset on an AMD GPU machine, but never confirmed a working policy.
+
+The website's **Training** page is related but different: it hands out tasks and answer labels (train/test split, sessions of
+100). It doesn't record camera frames or robot actions, which a policy would need.
 
 ## Run it yourself
 
