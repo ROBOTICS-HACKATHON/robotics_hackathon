@@ -66,15 +66,19 @@ class Experience:
 class LearnedModel:
     """(u, v) -> joint pose that touches there. Calibration points + experience, locally weighted."""
 
-    def __init__(self, calib, exp, width=0.18, ridge=1e-3):
+    def __init__(self, calib, exp, width=0.18, ridge=1e-3, half_life=100):
         pts = calib["points"]
         uv = [[p["u"], p["v"]] for p in pts]
         q = [p["q"] for p in pts]
         w = [3.0] * len(pts)  # taught points count a bit more
-        for t in exp.data["touches"]:
+        touches = exp.data["touches"]
+        n = len(touches)
+        for i, t in enumerate(touches):
             uv.append(t["uv"])
             q.append(t["q"])
-            w.append(1.0)
+            # recent touches count more (a touch `half_life` touches ago counts half), so the model follows
+            # slow drift and small moves of the arm or screen instead of averaging them away; never below 0.15
+            w.append(max(0.15, 0.5 ** ((n - 1 - i) / half_life)) if half_life else 1.0)
         self.uv, self.q, self.w = np.array(uv, float), np.array(q, float), np.array(w, float)
         self.home = np.array(calib["home"], float)
         self.width, self.ridge = width, ridge

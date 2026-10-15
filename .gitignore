@@ -19,3 +19,4 @@ touch/directions.json
 node_modules/
 .astro/
 dist/
+.wrangler/

@@ -46,6 +46,11 @@ SOLVER_URL=https://captchasolver.alvaro-camposmndz.workers.dev
 CLOUDFLARE_ACCOUNT_ID=
 CLOUDFLARE_API_TOKEN=
 
+# Robot link: your deployment of the captcha/ site (with its /api) and the key you set there as the
+# ROBOT_KEY secret. Used by ./lr captcha-train, ./lr captcha --web, ./lr practice --web. Never commit the key.
+TOUCH_WEB=
+ROBOT_KEY=
+
 # Recording timing (seconds)
 EPISODE_TIME=30
 RESET_TIME=15

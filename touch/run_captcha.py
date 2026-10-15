@@ -19,6 +19,8 @@ Everything is saved in outputs/run/<time>/ : every photo, the solver's answer, t
 
   ./lr captcha --dry-run          camera + solver only: shows what it WOULD tap, no arm
   ./lr captcha --learn-layout     teach the choice / checkbox / verified pages
+  ./lr captcha-train [--count N]  training: starts sessions on the Training page by itself, retries a wrong
+                                  answer on the same challenge until solved (N = challenges to solve), and (with the robot link, TOUCH_WEB) learns from every tap
 """
 
 import argparse
@@ -60,11 +62,14 @@ class Config:
     dry_run: bool = False
     stop_on_fail: bool = True
     size: tuple = (1280, 800)
+    training: bool = False       # start sessions itself, keep going after fails, never stop on a stale error
 
 
 @dataclass
 class Result:
     n: int
+    challenge: str = ""          # the site's name for it (robot link), e.g. "3/100 · Train · dogs-5"
+    attempt: int = 1             # which try on this same challenge
     outcome: str = "error"       # pass | fail | pass_unconfirmed | unknown | dry_run | error
     seconds: float = 0.0
     target: str = ""
@@ -78,8 +83,11 @@ class Run:
     """One run of the loop. `look`, `solve` and `arm` are injected, so the logic is testable without
     hardware (see tests/test_run_captcha.py)."""
 
-    def __init__(self, look, solve, arm, layout, cfg, out_dir, log=None, sleep=time.sleep, clock=time.time):
+    def __init__(self, look, solve, arm, layout, cfg, out_dir, log=None, sleep=time.sleep, clock=time.time, web=None):
         self.look, self.solve, self.arm, self.layout, self.cfg = look, solve, arm, layout, cfg
+        self.web = web             # WebTouches: the site reports pass/fail (and touches) itself
+        self.failed_answers = set()  # tile sets already marked wrong on the current challenge
+        self.attempt_of = ("", 0)    # (challenge, how many tries on it so far)
         self.out = Path(out_dir)
         self.say = log or (lambda m: print(m, flush=True))
         self.sleep, self.clock = sleep, clock
@@ -108,7 +116,10 @@ class Run:
 
     # ------------------------------------------------------------------ 1. get to the grid
     def reach_grid(self):
-        """Look, and tap whatever page we are on until the image grid is up and steady. Returns (img, state)."""
+        """Look, and tap whatever page we are on until the image grid is up and steady. Returns (img, state).
+        With the robot link the site itself says which screen it shows and where its buttons are, so nothing
+        has to be taught; the camera is still used for the grid (the solver needs the photo). Each page seen
+        that way is also learned from the camera, for runs without the link."""
         cfg, t0 = self.cfg, self.clock()
         taps, last = {}, (None, 0.0)          # taps per page kind; (kind, time) of the last page tap
         blind = 0
@@ -122,42 +133,124 @@ class Run:
                 self.sleep(0.7)
                 continue
             blind = 0
-            st = classify(img, self.layout)
-            self.say(f"   page: {st}")
-            if st.kind == "grid":
-                if st.error:
+            kind, spot, why = self._site_page(img)
+            if kind is None:                         # no robot link (or it is quiet): the camera decides
+                st = classify(img, self.layout)
+                self.say(f"   page: {st}")
+                kind = st.kind
+                if kind == "grid":
+                    if st.error and cfg.training:
+                        self.say("   wrong answer on screen: solving the same challenge again")
+                    elif st.error:
+                        self.save("page_grid_error", img)
+                        raise RunError("The grid still shows 'Incorrect selection' from before. Reload the page "
+                                       "(or tap its reset button) and start again.")
+                    img2 = self.snap(0.7)               # steady? (images loaded, animations done)
+                    st2 = classify(img2, self.layout) if img2 is not None else None
+                    if (st2 is not None and st2.kind == "grid" and (cfg.training or not st2.error)
+                            and _steady(img, img2)):
+                        self.save("page_grid", img2)
+                        return img2, st2
+                    continue
+                if kind in PAGES:
+                    spot = self.layout.tap(kind) if self.layout else None
+                    if cfg.training and kind == "choice" and self.layout and self.layout.start_tap():
+                        spot = self.layout.start_tap()      # Training page: start a whole session
+                    why = f"on the {kind} page"
+            elif kind == "grid":
+                try:                                 # the site says grid: the camera finds its geometry
+                    st = _grid_state(img)
+                except GridNotFound as e:
+                    self.say(f"   site: grid, camera: not yet ({e})")
+                    self.sleep(0.7)
+                    continue
+                if st.error and cfg.training:
+                    self.say("   wrong answer on screen: solving the same challenge again")
+                elif st.error:
                     self.save("page_grid_error", img)
                     raise RunError("The grid still shows 'Incorrect selection' from before. Reload the page "
                                    "(or tap its reset button) and start again.")
-                img2 = self.snap(0.7)               # steady? (images loaded, animations done)
-                st2 = classify(img2, self.layout) if img2 is not None else None
-                if st2 is not None and st2.kind == "grid" and not st2.error and _steady(img, img2):
+                img2 = self.snap(0.7)
+                if img2 is not None and _steady(img, img2):
+                    try:
+                        st2 = _grid_state(img2)
+                    except GridNotFound:
+                        continue
                     self.save("page_grid", img2)
                     return img2, st2
                 continue
-            if st.kind in PAGES:
-                if cfg.dry_run:
-                    raise RunError(f"Page is '{st.kind}', not the grid; --dry-run never taps. Open the grid first.")
-                kind, when = last
-                if kind == st.kind and self.clock() - when < cfg.retap_after:
-                    self.sleep(0.7)                  # tapped a moment ago: give the page time
-                    continue
-                if taps.get(st.kind, 0) >= cfg.max_taps_per_page:
-                    raise RunError(f"Tapped the '{st.kind}' page {taps[st.kind]} times and it is still showing. "
-                                   "Check the taught position (./lr captcha --learn-layout).")
-                spot = self.layout.tap(st.kind) if self.layout else None
-                if spot is None:
-                    raise RunError(f"I don't know where to tap on the '{st.kind}' page. "
-                                   "Run ./lr captcha --learn-layout first.")
-                self.save(f"page_{st.kind}", img)
-                self.tap(*spot, f"on the {st.kind} page")
-                self.home()
-                taps[st.kind] = taps.get(st.kind, 0) + 1
-                last = (st.kind, self.clock())
-                self.sleep(cfg.settle)
+            elif kind in ("loading", "wait"):
+                self.sleep(0.7)
                 continue
-            self.sleep(0.8)                          # unknown: loading, or the page is changing
+            if kind not in PAGES:
+                self.sleep(0.8)                      # unknown: loading, or the page is changing
+                continue
+            if cfg.dry_run:
+                raise RunError(f"Page is '{kind}', not the grid; --dry-run never taps. Open the grid first.")
+            k0, when = last
+            if k0 == kind and self.clock() - when < cfg.retap_after:
+                self.sleep(0.7)                      # tapped a moment ago: give the page time
+                continue
+            if taps.get(kind, 0) >= cfg.max_taps_per_page:
+                raise RunError(f"Tapped the '{kind}' page {taps[kind]} times and it is still showing. "
+                               + ("The tap is probably missing the button (check the aim: ./lr practice --web)."
+                                  if self.web is not None else "Check the taught position (./lr captcha --learn-layout)."))
+            if spot is None:
+                raise RunError(f"I don't know where to tap on the '{kind}' page. "
+                               "Run ./lr captcha --learn-layout first (or use the robot link: --web).")
+            self.save(f"page_{kind}", img)
+            self.tap(*spot, why)
+            self.home()
+            taps[kind] = taps.get(kind, 0) + 1
+            last = (kind, self.clock())
+            self.sleep(cfg.settle)
         raise RunError(f"The grid did not appear within {cfg.page_timeout:.0f} s.")
+
+    def _site_page(self, img):
+        """(kind, (u, v) to tap, description) from the site itself, or (None, None, None) without the link."""
+        if self.web is None:
+            return None, None, None
+        site = self.web.page()
+        if site is None:
+            return None, None, None
+        kind = site.get("kind")
+        tg = lambda n: self.web.target(site, n)  # noqa: E731
+        if site.get("fullscreen") is False and site.get("sw"):
+            if not getattr(self, "_warned_fs", False):
+                self._warned_fs = True
+                self.say(f"   the page is {site.get('w')}x{site.get('h')} but the screen is {site.get('sw')}x{site.get('sh')}: "
+                         "press F11 on the touch screen (waiting; nothing is tapped until then)")
+            return "wait", None, None
+        if kind == "choice":
+            start, card = tg("start"), tg("card")
+            spot, why = ((start, "on 'Start session'") if self.cfg.training and start else (card, "on the reCAPTCHA card"))
+            self._learn_page("choice", img, card, start)
+        elif kind == "checkbox":
+            spot, why = tg("checkbox"), "on 'I'm not a robot'"
+            self._learn_page("checkbox", img, spot)
+        elif kind == "verified":
+            spot, why = tg("restart"), "on 'Start again'"
+            self._learn_page("verified", img, spot)
+        elif kind in ("grid", "loading"):
+            return kind, None, None
+        else:
+            return None, None, None              # other / slider: let the camera decide
+        self.say(f"   page (site): {kind}")
+        return kind, spot, why
+
+    def _learn_page(self, kind, img, tap, start=None):
+        """Remember what this page looks like on camera (and where to tap), once per run, for runs without the link."""
+        if self.layout is None or tap is None or kind in getattr(self, "_learned_pages", set()):
+            return
+        self._learned_pages = getattr(self, "_learned_pages", set()) | {kind}
+        try:
+            self.layout.teach(kind, img, tap)
+            if start is not None:
+                self.layout.pages[kind]["start"] = [round(start[0], 5), round(start[1], 5)]
+            self.layout.save()
+            self.say(f"   learned the '{kind}' page from the site (camera signature + tap spot saved)")
+        except Exception as e:  # never stop a run over this
+            self.say(f"   (could not save the '{kind}' page: {e})")
 
     # ------------------------------------------------------------------ 2. ask the solver
     def ask_solver(self, img, state):
@@ -239,6 +332,22 @@ class Run:
             raise RunError(f"The solver's Verify position is {off:.2f} grid-widths from the Verify button seen "
                            "in the photo. Not pressing it.")
         self.tap(vp["x_norm"], vp["y_norm"], "VERIFY")
+        # with the robot link we know where that tap landed: missed the button (or no touch) -> tap it again now,
+        # instead of waiting for an answer that can't come
+        u2, v2 = vp["x_norm"], vp["y_norm"]
+        for extra in range(2):
+            rec = (getattr(self.arm, "taps", None) or [None])[-1] if isinstance(self.arm, LearningArm) else None
+            if not isinstance(rec, dict) or rec.get("skipped"):
+                break
+            el = rec.get("el") or ""
+            if rec.get("touches") and "verify" in el:
+                break
+            if rec.get("miss_uv"):              # it landed off by (du, dv): aim that much the other way
+                u2 = min(max(u2 - rec["miss_uv"][0], 0.0), 1.0)
+                v2 = min(max(v2 - rec["miss_uv"][1], 0.0), 1.0)
+            self.say(f"   Verify missed ({'landed on ' + el if rec.get('touches') else 'no touch'}): tapping it again, "
+                     "aim corrected by the miss")
+            self.tap(u2, v2, "VERIFY again")
         self.home()
 
     # ------------------------------------------------------------------ 7. the site's answer
@@ -248,6 +357,10 @@ class Run:
         last_img = None
         self.sleep(cfg.settle)
         while self.clock() - t0 < cfg.outcome_timeout:
+            got = self.web.result() if self.web is not None else None
+            if got is not None and got.get("state") in ("pass", "fail"):
+                self.save(f"result_{got['state']}_site", self.snap())
+                return got["state"], f"the site reported {got['state'].upper()} {got.get('challenge') or ''}".strip()
             img = self.snap()
             if img is None:
                 self.sleep(0.7)
@@ -256,7 +369,7 @@ class Run:
             st = classify(img, self.layout)
             if st.kind == "grid":
                 gone = 0
-                if st.error:
+                if st.error and self.web is None:
                     self.save("result_fail", img)
                     return "fail", "the site says: Incorrect selection"
                 if retries and self.clock() - t0 >= cfg.verify_wait:
@@ -278,6 +391,36 @@ class Run:
         self.save("result_timeout", last_img)
         return "unknown", f"the site did not answer within {cfg.outcome_timeout:.0f} s (this is NOT a fail)"
 
+    def _reuse_answer(self, state):
+        """Retry after a wrong answer: the solver was right, so the taps missed. Keep its answer (no new solver
+        call) as long as the grid is where it was; run_selection then taps only the tiles that differ."""
+        res = getattr(self, "last_answer", None)
+        if not res:
+            return None
+        worst, ok = check_presses_against_grid(res["presses"], state.grid)
+        if not ok:
+            self.say("   the grid moved since the last try: asking the solver again")
+            return None
+        self.say(f"   same challenge: keeping the solver's answer {res['tiles']}, fixing the taps")
+        return res
+
+    def _which_challenge(self, r):
+        """Same challenge as the last try (after a wrong answer) or a new one? Wrong answers are only remembered
+        for the challenge they were given on."""
+        name = _challenge_name(self.web)
+        prev, n = self.attempt_of
+        # with the robot link the site names the challenge; without it, a wrong answer leaves the same grid up
+        same = (name == prev) if name else getattr(self, "_last_outcome", None) == "fail"
+        if same:
+            n += 1
+        else:
+            n, self.failed_answers, self.last_answer = 1, set(), None
+        self.attempt_of = (name, n)
+        r.challenge, r.attempt = name, n
+        if n > 1:
+            self.say(f"   try {n} on this challenge" + (f" ({name})" if name else "")
+                     + (f"; wrong before: {[sorted(x) for x in self.failed_answers]}" if self.failed_answers else ""))
+
     # ------------------------------------------------------------------ one challenge, and the loop
     def solve_one(self, n):
         t0 = self.clock()
@@ -289,8 +432,14 @@ class Run:
         self.say(f"\n=== challenge {n} ===")
         try:
             img, st = self.reach_grid()
-            res, st, img = self.ask_solver(img, st)
+            self._which_challenge(r)
+            res = self._reuse_answer(st) if r.attempt > 1 else None
+            if res is None:
+                res, st, img = self.ask_solver(img, st)
+            self.last_answer = res
             r.target, r.tiles = res["target"], res["tiles"]
+            if self.web is not None:
+                self.web.drain_results()             # only this challenge's result counts
             if self.cfg.dry_run:
                 r.outcome, r.detail = "dry_run", f"would tap tiles {res['tiles']} then Verify; plan saved in {self.folder}"
             else:
@@ -302,6 +451,18 @@ class Run:
         except Exception as e:  # arm, camera, anything unexpected: stop, and the arm goes home on exit
             r.outcome, r.detail = "error", f"{type(e).__name__}: {e}"
         r.seconds = round(self.clock() - t0, 1)
+        self._last_outcome = r.outcome
+        if r.outcome == "fail" and r.tiles:
+            self.failed_answers.add(frozenset(r.tiles))
+        elif r.outcome in ("pass", "pass_unconfirmed"):
+            self.failed_answers = set()
+        if hasattr(self.arm, "end_challenge"):      # learning arm: save the taps, refit the model
+            taps = self.arm.end_challenge(r.outcome)
+            if taps:
+                (self.folder / "taps.json").write_text(json.dumps(taps, indent=1))
+                errs = [t["err_px"] for t in taps if t["err_px"] is not None]
+                self.say(f"   taps: {len(taps)}, landed {len(errs)}" + (f", miss median {np.median(errs):.0f}px"
+                                                                         f", max {max(errs):.0f}px" if errs else ""))
         (self.folder / "result.json").write_text(json.dumps(asdict(r), indent=1))
         with open(self.out / "results.jsonl", "a") as f:
             f.write(json.dumps(asdict(r)) + "\n")
@@ -311,18 +472,122 @@ class Run:
 
     def run(self):
         self.out.mkdir(parents=True, exist_ok=True)
-        results = []
-        for n in range(1, self.cfg.count + 1):
+        results, errors_in_row = [], 0
+        # training: --count = challenges SOLVED (a wrong answer is retried on the same challenge, so it can take
+        # several tries each); capped at 6 tries per wanted challenge so it always ends
+        limit = self.cfg.count * 6 if self.cfg.training else self.cfg.count
+        for n in range(1, limit + 1):
             r = self.solve_one(n)
             results.append(r)
+            errors_in_row = errors_in_row + 1 if r.outcome in ("error", "unknown") else 0
+            if self.cfg.training:                     # training: fails are data; stop only when stuck
+                if sum(x.outcome in ("pass", "pass_unconfirmed") for x in results) >= self.cfg.count:
+                    break
+                if errors_in_row >= 3:
+                    self.say("3 challenges in a row went wrong (not just a wrong answer): stopping.")
+                    break
+                self.home()
+                continue
             if r.outcome not in ("pass", "pass_unconfirmed", "dry_run"):
                 if r.outcome != "fail" or self.cfg.stop_on_fail:
                     break
         passed = sum(r.outcome in ("pass", "pass_unconfirmed") for r in results)
+        if self.cfg.training and results:
+            fails = sum(r.outcome == "fail" for r in results)
+            self.say(f"\nTraining: {passed} solved, {fails} wrong answers (retried), {len(results) - passed - fails} errors.")
+            tries = [r.attempt for r in results if r.outcome in ("pass", "pass_unconfirmed")]
+            if tries:
+                self.say(f"Tries needed per solved challenge: " + ", ".join(map(str, tries))
+                         + f"  ({sum(t == 1 for t in tries)}/{len(tries)} first try)")
         self.say(f"\nDone: {passed}/{len(results)} passed" + (f" (of {self.cfg.count} planned)"
                                                           if len(results) < self.cfg.count else "")
                  + f".  Details: {self.out}")
         return results
+
+
+class LearningArm:
+    """Wraps the Tapper: after every tap, the site says where the stylus really landed. Each tap becomes
+    experience for the learned model (the same data practice collects), so solving CAPTCHAs is practice too.
+    The model is refit after every challenge, so the next challenge already aims better."""
+
+    def __init__(self, tapper, web, tol_px=15.0, log=print):
+        from learner import LearnedModel, reward, zone_of
+        from common import load_calib
+        self.t, self.web, self.tol, self.say = tapper, web, tol_px, log
+        self._reward, self._zone_of, self._LM = reward, zone_of, LearnedModel
+        self.calib = load_calib()
+        self.taps = []
+
+    def tap(self, u, v):
+        t = self.t
+        self.web.drain()
+        zone = self._zone_of(u, v, t.zone_centers)
+        arm = t.zones.best(zone) if t.zones is not None else None
+        t.last_touch_q = None
+        t.tap(u, v)
+        got = self.web.all_touches(wait=4.0 if self.web.errors else 1.5)   # slow link: wait longer
+        rec = {"target": [float(u), float(v)], "zone": zone, "press": t.press, "touches": len(got), "err_px": None,
+               "landed": None, "el": None, "t": time.time()}
+        if got and not got[0].get("fullscreen", True):
+            g = got[0]
+            rec.update(landed=[g["u"], g["v"]], el=g.get("el"), reward=None, skipped="not full-screen")
+            self.say("      (page not full-screen: this touch is not learned from)")
+            self.taps.append(rec)
+            return
+        if got:
+            g = got[0]
+            w, h = g.get("w") or 1000, g.get("h") or 1000
+            err = float(np.hypot((g["u"] - u) * w, (g["v"] - v) * h))
+            r = self._reward(err, True, len(got), t.last_force_stop, self.tol)
+            rec.update(err_px=round(err, 1), landed=[g["u"], g["v"]], el=g.get("el"), reward=r)
+            if getattr(t, "vision", None) is not None and t.last_hover_obs:
+                t.vision.learn(t.last_hover_obs, (g["u"], g["v"]))   # the cameras learn where the tip really was
+            if t.last_touch_q is not None:
+                t.exp.add(t.last_touch_q, (g["u"], g["v"]), (u, v), r, t.press,
+                          {"src": "captcha", "err_px": err, "el": g.get("el")})
+            rec["miss_px"] = [round((g["u"] - u) * w, 1), round((g["v"] - v) * h, 1)]
+            rec["miss_uv"] = [g["u"] - u, g["v"] - v]
+            clicks = self.web.take_clicks()
+            rec["clicked"] = clicks
+            hit = g.get("el") or ""
+            self.say(f"      landed {err:4.0f}px from the aim ({rec['miss_px'][0]:+.0f} right, {rec['miss_px'][1]:+.0f} down)"
+                     + (f" on {hit}" if hit else "")
+                     + (f", clicked {', '.join(clicks)}" if clicks else ", NO click (touched but the page didn't count it)"))
+        elif self.web.errors:
+            rec.update(reward=None, skipped="robot link down")
+            self.say("      (robot link down: don't know if it touched; not learned from)")
+            self.taps.append(rec)
+            return
+        else:
+            r = self._reward(0, False, 0, t.last_force_stop, self.tol)
+            rec["reward"] = r
+            self.say("      the site saw NO touch")
+        if t.zones is not None and arm is not None:
+            t.zones.update(zone, arm, r)
+        t.exp.data.setdefault("attempts", []).append(
+            {"zone": zone, "try": 1, "err_px": rec["err_px"], "touched": bool(got), "press": t.press, "slow": 1.0,
+             "reward": r, "target": [float(u), float(v)], "t": time.time(), "src": "captcha"})
+        self.taps.append(rec)
+
+    def go_home(self):
+        self.t.go_home()
+
+    def end_challenge(self, outcome):
+        taps, self.taps = self.taps, []
+        for x in taps:
+            x["outcome"] = outcome
+        self.t.exp.save()
+        if getattr(self.t, "vision", None) is not None and self.t.vision.enabled:
+            self.t.vision.save()
+        if self.t.learned is not None:          # refit: the next challenge aims with what was just learned
+            self.t.learned = self._LM(self.calib, self.t.exp)
+            self.t.model.touch_pose = self.t.learned.touch_pose
+        return taps
+
+
+def _challenge_name(web):
+    pg = web.page() if web is not None else None
+    return (pg or {}).get("challenge") or ""
 
 
 def _grid_state(img):
@@ -348,7 +613,12 @@ def main():
     p.add_argument("--delay", type=float, default=5, help="seconds to switch to the page before starting")
     p.add_argument("--layout", default=str(LAYOUT_PATH))
     p.add_argument("--learn-layout", action="store_true", help="teach the choice / checkbox / verified pages, then exit")
-    p.add_argument("--only", choices=PAGES, nargs="+", help="with --learn-layout: teach just these pages")
+    p.add_argument("--only", choices=PAGES + ("start",), nargs="+",
+                   help="with --learn-layout: teach just these pages ('start' = the Start session button)")
+    p.add_argument("--training", action="store_true",
+                   help="training: start sessions on the Training page, keep going after wrong answers")
+    p.add_argument("--web", action="store_true",
+                   help="robot link (TOUCH_WEB, ROBOT_KEY): the site reports results and where every tap landed")
     p.add_argument("--http-port", type=int, default=8765)
     p.add_argument("--dry-run", action="store_true", help="camera + solver only: show the plan, never move the arm")
     p.add_argument("--tries", type=int, default=3)
@@ -371,11 +641,16 @@ def main():
     p.add_argument("--simple-path", action="store_true")
     p.add_argument("--no-learned", action="store_true")
     p.add_argument("--no-correct", action="store_true")
+    p.add_argument("--cameras", default="", help="tip vision while tapping: the phone cameras, comma-separated ('none' = off)")
+    p.add_argument("--tip-color", default="pink")
+    p.add_argument("--screen-mm", type=float, default=300.0)
     a = p.parse_args()
 
-    from see import ScreenCamera
+    from see import open_screen_camera
     w, h = map(int, a.size.lower().split("x"))
-    cam = ScreenCamera(a.camera, w, h, a.cam_mode)
+    cam = open_screen_camera(a.camera, w, h, a.cam_mode)
+    if hasattr(cam, "describe"):
+        print("Screen " + cam.describe())
 
     if a.learn_layout:
         from learn_layout import learn
@@ -383,10 +658,10 @@ def main():
         return
 
     layout = SiteLayout.load(a.layout)
-    if not layout.pages:
+    if not layout.pages and not a.web:
         print("note: no taught pages yet (./lr captcha --learn-layout). Fine if the grid is already open; "
               "otherwise the robot can't tap the choice page / checkbox.")
-    elif layout.missing():
+    elif layout.missing() and not a.web:
         print(f"note: pages not taught yet: {', '.join(layout.missing())}")
 
     from solve import solve_screen, solver_config
@@ -396,13 +671,26 @@ def main():
         raise SystemExit(e.detail)
 
     def look():
-        return cam.screen_image(tries=6, allow_remembered=False)
+        try:
+            return cam.screen_image(tries=6, allow_remembered=False)
+        except Exception as e:  # a phone stream dropping out: no picture this time, look again
+            print(f"   (camera: {e})", flush=True)
+            time.sleep(0.5)
+            return None
 
     def solve(img, target, model):
         return solve_screen(img, cfg_s, target, model, (w, h))
 
     cfg = Config(count=a.count, tries=a.tries, max_fix=a.max_fix, verify_retries=a.verify_retries,
-                 target=a.target, model=a.model, dry_run=a.dry_run, stop_on_fail=not a.continue_on_fail, size=(w, h))
+                 target=a.target, model=a.model, dry_run=a.dry_run,
+                 stop_on_fail=not (a.continue_on_fail or a.training), size=(w, h), training=a.training)
+    if a.training and not a.web and layout.start_tap() is None:
+        print("note: 'Start session' not taught (./lr captcha --learn-layout --only start): on the Training page "
+              "the robot taps the single-challenge card instead.")
+    web = None
+    if a.web and not a.dry_run:
+        from webtouch import WebTouches
+        web = WebTouches(msg="CAPTCHA " + ("training" if a.training else "run"))
 
     if a.dry_run:
         class NoArm:
@@ -416,15 +704,30 @@ def main():
         if not a.port:
             raise SystemExit("--port is required (./lr passes it).")
         from tap import Tapper
+        vision = None
+        if a.cameras and a.cameras != "none":
+            from common import load_calib
+            from correction import calib_id
+            from tipvision import TipVision
+            vision = TipVision(a.cameras, a.tip_color, width_mm=a.screen_mm, cid=calib_id(load_calib()))
+            print(vision.describe())
         arm_ctx = Tapper(a.port, a.id, a.robot, a.lift, a.press, a.speed, smooth=a.smooth,
                          own_path=not a.simple_path, correct=not a.no_correct, dwell=a.dwell,
-                         max_load=a.max_load, torque=a.torque, learned=not a.no_learned)
+                         max_load=a.max_load, torque=a.torque, learned=not a.no_learned, vision=vision)
 
     if a.delay > 0:
         print(f"Starting in {a.delay:.0f} s: switch to the page on the touch screen (full-screen, F11)", flush=True)
         time.sleep(a.delay)
     with arm_ctx as arm:
-        results = Run(look, solve, arm, layout, cfg, a.out).run()
+        if web is not None:
+            print(f"Learning from every tap: {len(arm.exp)} touches of experience so far.")
+            arm = LearningArm(arm, web)
+        try:
+            results = Run(look, solve, arm, layout, cfg, a.out, web=web).run()
+        finally:
+            if web is not None:
+                web.stop()
+                print(f"Experience: {len(arm.t.exp)} touches saved (./lr heatmap to see accuracy per zone).")
     raise SystemExit(0 if results and all(r.outcome in ("pass", "pass_unconfirmed", "dry_run") for r in results) else 1)
 
 

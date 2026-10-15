@@ -13,15 +13,67 @@ source "$HERE/lr.conf"
 export SOLVER_URL="${SOLVER_URL:-https://captchasolver.alvaro-camposmndz.workers.dev}"
 export CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-}"
 export CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
+# Robot link (captcha/ site with its /api): the site reports where every tap landed and each pass/fail.
+export TOUCH_WEB="${TOUCH_WEB:-}"
+export ROBOT_KEY="${ROBOT_KEY:-}"
 
 IMAGE=lerobot
 OUT="$HERE/outputs"
 mkdir -p "$OUT" "$LR_DATA"
 
+# CAMERA=auto: use every view there is.
+#   screen view (what the solver gets, and where the grid is): the live screenshot when it is running
+#   (pixel-exact), with the phones as fallback views; without the screenshot, the first phone that answers
+#   tip vision while tapping (VISION=auto): the phones that answer (CAMERA_PHONE, CAMERA2)
+cam_ok() {  # is this camera reachable right now? (quick: ~1 s per phone)
+  local c="$1" host
+  case "$c" in
+    ""|screen) return 1 ;;
+    /dev/*) [ -e "$c" ] ;;
+    ipwebcam:*) host="${c#ipwebcam:}"; [[ "$host" == *:* ]] || host="$host:8080"
+                [ "$(curl -s -m 1.5 -o /dev/null -w '%{http_code}' "http://$host/shot.jpg" 2>/dev/null)" = 200 ] ;;
+    droidcam:*) host="${c#droidcam:}"; [[ "$host" == *:* ]] || host="$host:4747"
+                curl -s -m 1.5 -o /dev/null "http://$host/" 2>/dev/null ;;
+    http*) curl -s -m 1.5 -o /dev/null "$c" 2>/dev/null ;;
+    *) return 0 ;;
+  esac
+}
+AUTO_CAMS=0
+AUTO_PHONES=""
+resolve_cameras() {
+  [ "${CAMERA:-}" = auto ] || return 0
+  AUTO_CAMS=1
+  local c age
+  for c in "${CAMERA_PHONE:-}" "${CAMERA2:-}"; do
+    if [ -n "$c" ]; then
+      if cam_ok "$c"; then AUTO_PHONES="${AUTO_PHONES:+$AUTO_PHONES,}$c"
+      else echo -e "\033[1;34m==>\033[0m Phone $c not answering: going on without it" >&2; fi
+    fi
+  done
+  CAMERA2=""
+  age=$(( $(date +%s) - $(stat -c %Y "$OUT/screen_live.jpg" 2>/dev/null || echo 0) ))
+  if [ "$age" -le 3 ] || [ -z "$AUTO_PHONES" ]; then
+    CAMERA=screen
+    echo -e "\033[1;34m==>\033[0m Screen view: the live screenshot${AUTO_PHONES:+ (phones as fallback: $AUTO_PHONES)}" >&2
+  else
+    CAMERA="${AUTO_PHONES%%,*}"
+    echo -e "\033[1;34m==>\033[0m Screen view: phone $CAMERA (no live screenshot running)" >&2
+  fi
+  [ -n "$AUTO_PHONES" ] && echo -e "\033[1;34m==>\033[0m Tip vision: $AUTO_PHONES" >&2
+  return 0
+}
+resolve_cameras
+
 # CAMERA=screen: a live screenshot of THIS computer's screen instead of a camera (the CAPTCHA page with its
 # 4 corner markers is on this screen). PowerShell saves outputs/screen_live.jpg ~4x a second while a command runs.
 SCREENCAP=0
 if [ "${CAMERA:-}" = screen ]; then SCREENCAP=1; CAMERA=/work/outputs/screen_live.jpg; fi
+# Every view of the screen, best first (CAMERA=auto): the screenshot, then the phones
+CAMERA_VIEWS="$CAMERA"
+if [ "$AUTO_CAMS" = 1 ] && [ -n "$AUTO_PHONES" ]; then
+  CAMERA_VIEWS="$CAMERA"
+  for c in ${AUTO_PHONES//,/ }; do [ "$c" = "$CAMERA" ] || CAMERA_VIEWS="$CAMERA_VIEWS,$c"; done
+fi
 
 start_screencap() {
   # Nothing is started from here. screencap.ps1 runs in your own PowerShell window and keeps
@@ -29,10 +81,10 @@ start_screencap() {
   local f="$OUT/screen_live.jpg" age
   age=$(( $(date +%s) - $(stat -c %Y "$f" 2>/dev/null || echo 0) ))
   if [ "$age" -gt 3 ]; then
-    die "CAMERA=screen, but no fresh screenshot in outputs/screen_live.jpg.
-    Start the screen capture in a PowerShell window (and leave it open):
-      powershell -ExecutionPolicy Bypass -File \"\$HOME\\Downloads\\screencap.ps1\"
-    (the script is also in the repo: touch/screencap.ps1)"
+    die "Using the screenshot, but outputs/screen_live.jpg is not being updated.
+    Start FFmpeg in a PowerShell window and leave it open:
+      ffmpeg -hide_banner -loglevel warning -f gdigrab -framerate 4 -draw_mouse 0 -i desktop -q:v 3 -update 1 -y \"\\\\wsl.localhost\\Ubuntu-24.04\\home\\mehras\\robotics_hackathon\\outputs\\screen_live.jpg\"
+    (or switch the phones on, with CAMERA=auto)"
   fi
   say "Camera: live screenshot of this computer's screen (outputs/screen_live.jpg, ${age}s old)"
 }
@@ -91,7 +143,7 @@ run_hw() {
   # shellcheck disable=SC2086
   [ "$SCREENCAP" = 1 ] && start_screencap
   $RT run --rm -it --privileged -v /dev:/dev -v "$HERE":/repo ${RUN_EXTRA:-} $(common_flags) \
-    -e SOLVER_URL -e CLOUDFLARE_ACCOUNT_ID -e CLOUDFLARE_API_TOKEN "$IMAGE" "$@"
+    -e SOLVER_URL -e CLOUDFLARE_ACCOUNT_ID -e CLOUDFLARE_API_TOKEN -e TOUCH_WEB -e ROBOT_KEY "$IMAGE" "$@"
 }
 
 hf_user() {
@@ -246,6 +298,7 @@ ARM_ARGS() { echo "--port $FOLLOWER_PORT --id $FOLLOWER_ID --robot $ROBOT"; }
 # Cameras for the tip hover-check: VISION=auto uses CAMERA (+ CAMERA2 if set), VISION=off disables it
 VISION_CAMS() {
   [ "${VISION:-off}" = off ] && { echo none; return; }
+  [ "$AUTO_CAMS" = 1 ] && { echo "${AUTO_PHONES:-none}"; return; }
   local c="${CAMERA:-}"
   [ "$SCREENCAP" = 1 ] && c=""
   [ -n "${CAMERA2:-}" ] && c="${c:+$c,}$CAMERA2"
@@ -330,8 +383,25 @@ cmd_plan() {
 cmd_captcha() {
   case " $* " in *" --learn-layout "*) ;; *) need_solver ;; esac
   # shellcheck disable=SC2046
-  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/run_captcha.py $(ARM_ARGS) --camera "$CAMERA" --out /work/outputs/run \
-    --delay "${DELAY:-5}" "$@"
+  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/run_captcha.py $(ARM_ARGS) --camera "$CAMERA_VIEWS" --out /work/outputs/run \
+    --delay "${DELAY:-5}" --cameras "$(VISION_CAMS)" --tip-color "${TIP_COLOR:-pink}" \
+    --screen-mm "${SCREEN_WIDTH_MM:-300}" "$@"
+}
+
+need_link() {
+  [ -n "$TOUCH_WEB" ] && [ -n "$ROBOT_KEY" ] \
+    || die "set TOUCH_WEB (your site, e.g. https://mehras-captcha.pages.dev) and ROBOT_KEY in lr.conf (see captcha/README.md 'Robot link')"
+}
+
+# Training on the real site: starts sessions itself, keeps going after wrong answers, learns from every tap.
+cmd_captcha-train() {
+  need_solver
+  need_link
+  say "On the touch screen: ${TOUCH_WEB}/training/?robot=<ROBOT_KEY> (once), full-screen, 'Camera markers' ticked"
+  # shellcheck disable=SC2046
+  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/run_captcha.py $(ARM_ARGS) --camera "$CAMERA_VIEWS" --out /work/outputs/train \
+    --delay "${DELAY:-5}" --cameras "$(VISION_CAMS)" --tip-color "${TIP_COLOR:-pink}" \
+    --screen-mm "${SCREEN_WIDTH_MM:-300}" --training --web --count 100 "$@"
 }
 
 cmd_tip-live() {
@@ -410,7 +480,11 @@ Touch screen
   solve                     Camera -> screenshot -> solver API -> prints where to press (no arm, never taps)
   plan [--image FILE]       One photo -> JSON of what to click next, as u,v (0..1). Never moves the arm
   captcha [--count N]       Full loop on the real site: see, solve, tap tiles, check, Verify, read result
-                            (--learn-layout teaches the choice/checkbox pages once; --dry-run = camera + solver, no arm)
+                            (--learn-layout teaches the choice/checkbox pages once; --dry-run = camera + solver, no arm;
+                             --web = robot link: the site reports pass/fail and where each tap landed, and it learns)
+  captcha-train [--count N] Training on the real site (robot link): starts sessions by itself, retries a wrong answer
+                            until solved (N = challenges to solve), learns from every tap
+  practice --web            Practice on <TOUCH_WEB>/practice/ instead of the local calib page
   tip-live                  Live browser view of both cameras + tip height in mm (no arm needed)
                             (save photos, click the pen tip to teach its colour)
   smooth-preview [--accel N --speed S --smooth X]
@@ -423,7 +497,7 @@ EOF
 
 c="${1:-help}"; shift || true
 case "$c" in
-  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|teach-dirs|tap|see|fit|practice|cam-test|tip-test|heatmap|tip-live|share|smooth-preview|solve|plan|captcha)
+  build|login|attach|ports|cams|snap|calibrate|teleop|test|record|train|logs|stop|status|gputest|run|shell|help|touch-calib|set-home|teach-dirs|tap|see|fit|practice|cam-test|tip-test|heatmap|tip-live|share|smooth-preview|solve|plan|captcha|captcha-train)
     "cmd_$c" "$@" ;;
   *) cmd_help; exit 1 ;;
 esac
