@@ -4,12 +4,11 @@
   <img src="media/robot1.gif" width="49%" alt="The robot arm taps the tiles of an image captcha on a laptop screen">
   <img src="media/robot2.gif" width="49%" alt="Close-up: the stylus on the arm presses a tile of the 'bicycles' captcha">
 </p>
-
 A robot arm that solves "select all images with…" captchas the way a person would: it **takes a screenshot of the
 screen, decides which pictures match, and taps them with a stylus** on the touch screen. In the robot's flow nothing is
 clicked by software: the solver only ever sees a screenshot, and the arm only ever touches glass.
 
-We built it at a robotics hackathon (TUWRC) with an SO-101 arm (a leader arm we move by hand, a follower arm that
+We built it at a robotics hackathon (Summit Sprint Hackathon by Austrian Startups, following TU Wien's Robotics Club challenge) with an SO-101 arm (a leader arm we move by hand, a follower arm that
 copies it and holds the stylus) and a team of five.
 
 > **These are our own mock captchas.** The site in [`captcha/`](captcha/) is a demo we made for this project. It is not
@@ -51,7 +50,7 @@ that, after two seconds, opens a "verify you are human" check. The check can be 
 Solving it navigates to a "verified" page.
 
 - `/training/` has the challenge picker: 400 photo puzzles (200 grids, 200 sliders), a train/test split (80/20 by
-  default) and sessions of 100 tasks in a row for repeatable runs.
+  default) and sessions of 100 tasks in a row for repeatable runs. We only support solving the grids at the moment.
 - A **"Camera markers"** switch draws four black ArUco markers in the page's corners. They tell `see.py` where the page is
   in the screenshot, so tick it before a robot run.
 - It is built for a stylus that wobbles: a touch that drags a little neither scrolls the page nor loses the click.
@@ -71,7 +70,7 @@ page: `see.py` cuts the image to the rectangle between them and scales it to a f
 `u = x / 1280`, `v = y / 800`. Nothing is calibrated, and the page can sit anywhere on the screen.
 
 The same code can read a camera instead (USB or RealSense, a phone running IP Webcam or DroidCam, a URL) for a screen that
-is a separate monitor. The demo doesn't use that.
+is a separate monitor. The demo doesn't use this, and it has not been tested. In theory, the actual recognition should work.
 
 ### 3. The brain ([`captchasolver/`](captchasolver/))
 
@@ -303,21 +302,3 @@ web UI (`captchasolver serve`).
 | [`media/`](media/) | The clips, plots and the practice log used in this README |
 | [`PLAN.md`](PLAN.md), [`HOWTO.md`](HOWTO.md), [`CLAUDE.md`](CLAUDE.md) | Team plan and interface rules, record/train/run guide, working notes for AI assistants |
 
-## Status: what is and isn't proven
-
-- **Seen working:** the arm calibrates, taps screen positions and runs the self-practice loop on real hardware (the clips and the
-  log above). In the captcha loop the robot sends each screenshot to the solver's `POST /api/robot/solve`
-  ([`touch/solve.py`](touch/solve.py)) and taps what comes back.
-- **Checked by automated tests, no robot needed:** `touch/tests` runs the loop against saved screenshots of the site, and the solver's
-  tests run offline against a fake model and fake pages. We also checked that the page is found when it sits anywhere inside a
-  larger screenshot (offset, or on a second monitor, with JPEG compression) and that the test runner works against the live demo site.
-  The solver's layout finder is additionally checked against simulated camera conditions (tint, dimming, tilt, blur), which only
-  matters if you photograph a screen instead of capturing it.
-- **Known mismatch:** the screenshots committed in `touch/tests/shots` show an earlier design of the site (no header bar, a page called
-  "Access website"). The current site's `/training/` page sits about 78 px lower, so the robot's page classifier says "unknown" on it and
-  the opt-in live test (`SITE_E2E=1 pytest touch/tests/test_e2e_site.py`) fails at the first page. Re-capture the shots with
-  `touch/tests/capture_site.py`, and re-teach the robot's pages (`./lr captcha --learn-layout`) if they were taught on the old look.
-- **Not measured:** this repo contains no measured end-to-end pass rate (the loop writes its results to `outputs/run/results.jsonl`, which is
-  git-ignored). The first-try tap miss is the open problem (see the practice results above).
-- **Not handled:** sliders (they need a drag) and the Turnstile checkbox in the robot loop.
-- **Never retry on a real captcha.** A second tap toggles a tile back, so practise on the test page, then demo.
