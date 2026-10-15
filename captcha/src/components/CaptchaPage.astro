@@ -43,7 +43,7 @@ const { demo = false } = Astro.props;
       <label for="session-split">Split<select id="session-split"><option value="train">Train · {trainingCatalog.filter((entry) => entry.split === 'train').length}</option><option value="test">Test · {trainingCatalog.filter((entry) => entry.split === 'test').length}</option></select></label>
       <label for="session-kind">Tasks<select id="session-kind"><option value="image">Image (default)</option><option value="slider">Slider (bonus)</option><option value="mixed">Mixed (optional)</option></select></label>
       <label for="session-count">Count<input id="session-count" type="number" min="1" value="100" /></label>
-      <label class="fullscreen-option"><input type="checkbox" id="session-skip-fail" /> Next challenge after a wrong answer</label>
+      <label for="session-max-fails">Move on after<input id="session-max-fails" type="number" min="0" value="5" title="wrong answers on one challenge before the session moves on (0 = never)" /> wrong answers</label>
       <p id="session-availability" class="muted" role="status"></p>
       <button id="start-session" class="button primary" type="button">Start session</button>
     </aside>
@@ -354,11 +354,21 @@ const { demo = false } = Astro.props;
 
     // Robot training: after a wrong answer, show the error for a moment, then move on to the next challenge
     // (the result has already been reported to the robot). Default on when the robot link is on.
-    const skipFail = document.querySelector<HTMLInputElement>('#session-skip-fail');
-    if (skipFail) {
-      const saved = readPreference('local', 'captcha-session-skip-fail');
-      skipFail.checked = saved ? saved === 'on' : document.documentElement.dataset.robotLink === 'on';
-      skipFail.addEventListener('change', () => savePreference('local', 'captcha-session-skip-fail', skipFail.checked ? 'on' : 'off'));
+    // A wrong answer leaves the same challenge up to be solved again; only after this many wrong answers on one
+    // challenge does the session move on (0 = never), so one impossible challenge can't stall training.
+    const maxFails = document.querySelector<HTMLInputElement>('#session-max-fails');
+    if (maxFails) {
+      const saved = readPreference('local', 'captcha-session-max-fails');
+      if (saved !== null && saved !== undefined && saved !== '') maxFails.value = saved;
+      maxFails.addEventListener('change', () => savePreference('local', 'captcha-session-max-fails', String(Math.max(0, Math.floor(Number(maxFails.value) || 0)))));
+    }
+    let failPosition = -1, failCount = 0;
+    function onWrongAnswer() {
+      if (queue.length === 0) return;
+      if (failPosition !== queuePosition) { failPosition = queuePosition; failCount = 0; }
+      failCount += 1;
+      const limit = Math.max(0, Math.floor(Number(maxFails?.value ?? 5) || 0));
+      if (limit > 0 && failCount >= limit) skipAfterFail();
     }
     function skipAfterFail() {
       if (complete || pending || !dialog?.open || queue.length === 0) return;
@@ -473,7 +483,7 @@ const { demo = false } = Astro.props;
       const detail: unknown = event.detail;
       if (typeof detail !== 'object' || detail === null || !('state' in detail) || !('kind' in detail)) return;
       if (detail.state === 'success' && detail.kind === kind) finish();
-      if (detail.state === 'error' && detail.kind === kind && skipFail?.checked) skipAfterFail();
+      if (detail.state === 'error' && detail.kind === kind) onWrongAnswer();
     });
     if (demo) {
       let introTimer: number | undefined;

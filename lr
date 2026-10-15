@@ -21,7 +21,10 @@ IMAGE=lerobot
 OUT="$HERE/outputs"
 mkdir -p "$OUT" "$LR_DATA"
 
-# CAMERA=auto: use the phones (CAMERA_PHONE, CAMERA2) when they answer, otherwise the live screenshot.
+# CAMERA=auto: use every view there is.
+#   screen view (what the solver gets, and where the grid is): the live screenshot when it is running
+#   (pixel-exact), with the phones as fallback views; without the screenshot, the first phone that answers
+#   tip vision while tapping (VISION=auto): the phones that answer (CAMERA_PHONE, CAMERA2)
 cam_ok() {  # is this camera reachable right now? (quick: ~1 s per phone)
   local c="$1" host
   case "$c" in
@@ -35,19 +38,29 @@ cam_ok() {  # is this camera reachable right now? (quick: ~1 s per phone)
     *) return 0 ;;
   esac
 }
+AUTO_CAMS=0
+AUTO_PHONES=""
 resolve_cameras() {
   [ "${CAMERA:-}" = auto ] || return 0
-  if cam_ok "${CAMERA_PHONE:-}"; then
-    CAMERA="$CAMERA_PHONE"
-    echo -e "\033[1;34m==>\033[0m Camera: phone ${CAMERA} (it answered)" >&2
-  else
+  AUTO_CAMS=1
+  local c age
+  for c in "${CAMERA_PHONE:-}" "${CAMERA2:-}"; do
+    if [ -n "$c" ]; then
+      if cam_ok "$c"; then AUTO_PHONES="${AUTO_PHONES:+$AUTO_PHONES,}$c"
+      else echo -e "\033[1;34m==>\033[0m Phone $c not answering: going on without it" >&2; fi
+    fi
+  done
+  CAMERA2=""
+  age=$(( $(date +%s) - $(stat -c %Y "$OUT/screen_live.jpg" 2>/dev/null || echo 0) ))
+  if [ "$age" -le 3 ] || [ -z "$AUTO_PHONES" ]; then
     CAMERA=screen
-    echo -e "\033[1;34m==>\033[0m Camera: no phone answered${CAMERA_PHONE:+ ($CAMERA_PHONE)}, using the screenshot" >&2
+    echo -e "\033[1;34m==>\033[0m Screen view: the live screenshot${AUTO_PHONES:+ (phones as fallback: $AUTO_PHONES)}" >&2
+  else
+    CAMERA="${AUTO_PHONES%%,*}"
+    echo -e "\033[1;34m==>\033[0m Screen view: phone $CAMERA (no live screenshot running)" >&2
   fi
-  if [ -n "${CAMERA2:-}" ] && ! cam_ok "$CAMERA2"; then
-    echo -e "\033[1;34m==>\033[0m Second camera $CAMERA2 not answering: tapping without it" >&2
-    CAMERA2=""
-  fi
+  [ -n "$AUTO_PHONES" ] && echo -e "\033[1;34m==>\033[0m Tip vision: $AUTO_PHONES" >&2
+  return 0
 }
 resolve_cameras
 
@@ -55,6 +68,12 @@ resolve_cameras
 # 4 corner markers is on this screen). PowerShell saves outputs/screen_live.jpg ~4x a second while a command runs.
 SCREENCAP=0
 if [ "${CAMERA:-}" = screen ]; then SCREENCAP=1; CAMERA=/work/outputs/screen_live.jpg; fi
+# Every view of the screen, best first (CAMERA=auto): the screenshot, then the phones
+CAMERA_VIEWS="$CAMERA"
+if [ "$AUTO_CAMS" = 1 ] && [ -n "$AUTO_PHONES" ]; then
+  CAMERA_VIEWS="$CAMERA"
+  for c in ${AUTO_PHONES//,/ }; do [ "$c" = "$CAMERA" ] || CAMERA_VIEWS="$CAMERA_VIEWS,$c"; done
+fi
 
 start_screencap() {
   # Nothing is started from here. screencap.ps1 runs in your own PowerShell window and keeps
@@ -279,6 +298,7 @@ ARM_ARGS() { echo "--port $FOLLOWER_PORT --id $FOLLOWER_ID --robot $ROBOT"; }
 # Cameras for the tip hover-check: VISION=auto uses CAMERA (+ CAMERA2 if set), VISION=off disables it
 VISION_CAMS() {
   [ "${VISION:-off}" = off ] && { echo none; return; }
+  [ "$AUTO_CAMS" = 1 ] && { echo "${AUTO_PHONES:-none}"; return; }
   local c="${CAMERA:-}"
   [ "$SCREENCAP" = 1 ] && c=""
   [ -n "${CAMERA2:-}" ] && c="${c:+$c,}$CAMERA2"
@@ -363,8 +383,9 @@ cmd_plan() {
 cmd_captcha() {
   case " $* " in *" --learn-layout "*) ;; *) need_solver ;; esac
   # shellcheck disable=SC2046
-  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/run_captcha.py $(ARM_ARGS) --camera "$CAMERA" --out /work/outputs/run \
-    --delay "${DELAY:-5}" "$@"
+  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/run_captcha.py $(ARM_ARGS) --camera "$CAMERA_VIEWS" --out /work/outputs/run \
+    --delay "${DELAY:-5}" --cameras "$(VISION_CAMS)" --tip-color "${TIP_COLOR:-pink}" \
+    --screen-mm "${SCREEN_WIDTH_MM:-300}" "$@"
 }
 
 need_link() {
@@ -378,8 +399,9 @@ cmd_captcha-train() {
   need_link
   say "On the touch screen: ${TOUCH_WEB}/training/?robot=<ROBOT_KEY> (once), full-screen, 'Camera markers' ticked"
   # shellcheck disable=SC2046
-  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/run_captcha.py $(ARM_ARGS) --camera "$CAMERA" --out /work/outputs/train \
-    --delay "${DELAY:-5}" --training --web --count 100 "$@"
+  RUN_EXTRA="-p 8765:8765" run_hw python /repo/touch/run_captcha.py $(ARM_ARGS) --camera "$CAMERA_VIEWS" --out /work/outputs/train \
+    --delay "${DELAY:-5}" --cameras "$(VISION_CAMS)" --tip-color "${TIP_COLOR:-pink}" \
+    --screen-mm "${SCREEN_WIDTH_MM:-300}" --training --web --count 100 "$@"
 }
 
 cmd_tip-live() {
@@ -460,8 +482,8 @@ Touch screen
   captcha [--count N]       Full loop on the real site: see, solve, tap tiles, check, Verify, read result
                             (--learn-layout teaches the choice/checkbox pages once; --dry-run = camera + solver, no arm;
                              --web = robot link: the site reports pass/fail and where each tap landed, and it learns)
-  captcha-train [--count N] Training on the real site (robot link): starts sessions by itself, keeps going after
-                            wrong answers, learns from every tap; no layout teaching needed
+  captcha-train [--count N] Training on the real site (robot link): starts sessions by itself, retries a wrong answer
+                            until solved (N = challenges to solve), learns from every tap
   practice --web            Practice on <TOUCH_WEB>/practice/ instead of the local calib page
   tip-live                  Live browser view of both cameras + tip height in mm (no arm needed)
                             (save photos, click the pen tip to teach its colour)

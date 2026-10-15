@@ -19,8 +19,8 @@ Everything is saved in outputs/run/<time>/ : every photo, the solver's answer, t
 
   ./lr captcha --dry-run          camera + solver only: shows what it WOULD tap, no arm
   ./lr captcha --learn-layout     teach the choice / checkbox / verified pages
-  ./lr captcha-train [--count N]  training: starts sessions on the Training page by itself, keeps going after
-                                  a wrong answer, and (with the robot link, TOUCH_WEB) learns from every tap
+  ./lr captcha-train [--count N]  training: starts sessions on the Training page by itself, retries a wrong
+                                  answer on the same challenge until solved (N = challenges to solve), and (with the robot link, TOUCH_WEB) learns from every tap
 """
 
 import argparse
@@ -68,6 +68,8 @@ class Config:
 @dataclass
 class Result:
     n: int
+    challenge: str = ""          # the site's name for it (robot link), e.g. "3/100 · Train · dogs-5"
+    attempt: int = 1             # which try on this same challenge
     outcome: str = "error"       # pass | fail | pass_unconfirmed | unknown | dry_run | error
     seconds: float = 0.0
     target: str = ""
@@ -84,6 +86,8 @@ class Run:
     def __init__(self, look, solve, arm, layout, cfg, out_dir, log=None, sleep=time.sleep, clock=time.time, web=None):
         self.look, self.solve, self.arm, self.layout, self.cfg = look, solve, arm, layout, cfg
         self.web = web             # WebTouches: the site reports pass/fail (and touches) itself
+        self.failed_answers = set()  # tile sets already marked wrong on the current challenge
+        self.attempt_of = ("", 0)    # (challenge, how many tries on it so far)
         self.out = Path(out_dir)
         self.say = log or (lambda m: print(m, flush=True))
         self.sleep, self.clock = sleep, clock
@@ -136,16 +140,15 @@ class Run:
                 kind = st.kind
                 if kind == "grid":
                     if st.error and cfg.training:
-                        self.say("   the grid still shows the last error: waiting for the next challenge")
-                        self.sleep(1.0)
-                        continue
-                    if st.error:
+                        self.say("   wrong answer on screen: solving the same challenge again")
+                    elif st.error:
                         self.save("page_grid_error", img)
                         raise RunError("The grid still shows 'Incorrect selection' from before. Reload the page "
                                        "(or tap its reset button) and start again.")
                     img2 = self.snap(0.7)               # steady? (images loaded, animations done)
                     st2 = classify(img2, self.layout) if img2 is not None else None
-                    if st2 is not None and st2.kind == "grid" and not st2.error and _steady(img, img2):
+                    if (st2 is not None and st2.kind == "grid" and (cfg.training or not st2.error)
+                            and _steady(img, img2)):
                         self.save("page_grid", img2)
                         return img2, st2
                     continue
@@ -162,9 +165,8 @@ class Run:
                     self.sleep(0.7)
                     continue
                 if st.error and cfg.training:
-                    self.sleep(1.0)
-                    continue
-                if st.error:
+                    self.say("   wrong answer on screen: solving the same challenge again")
+                elif st.error:
                     self.save("page_grid_error", img)
                     raise RunError("The grid still shows 'Incorrect selection' from before. Reload the page "
                                    "(or tap its reset button) and start again.")
@@ -348,7 +350,7 @@ class Run:
             st = classify(img, self.layout)
             if st.kind == "grid":
                 gone = 0
-                if st.error:
+                if st.error and self.web is None:
                     self.save("result_fail", img)
                     return "fail", "the site says: Incorrect selection"
                 if retries and self.clock() - t0 >= cfg.verify_wait:
@@ -370,6 +372,36 @@ class Run:
         self.save("result_timeout", last_img)
         return "unknown", f"the site did not answer within {cfg.outcome_timeout:.0f} s (this is NOT a fail)"
 
+    def _reuse_answer(self, state):
+        """Retry after a wrong answer: the solver was right, so the taps missed. Keep its answer (no new solver
+        call) as long as the grid is where it was; run_selection then taps only the tiles that differ."""
+        res = getattr(self, "last_answer", None)
+        if not res:
+            return None
+        worst, ok = check_presses_against_grid(res["presses"], state.grid)
+        if not ok:
+            self.say("   the grid moved since the last try: asking the solver again")
+            return None
+        self.say(f"   same challenge: keeping the solver's answer {res['tiles']}, fixing the taps")
+        return res
+
+    def _which_challenge(self, r):
+        """Same challenge as the last try (after a wrong answer) or a new one? Wrong answers are only remembered
+        for the challenge they were given on."""
+        name = _challenge_name(self.web)
+        prev, n = self.attempt_of
+        # with the robot link the site names the challenge; without it, a wrong answer leaves the same grid up
+        same = (name == prev) if name else getattr(self, "_last_outcome", None) == "fail"
+        if same:
+            n += 1
+        else:
+            n, self.failed_answers, self.last_answer = 1, set(), None
+        self.attempt_of = (name, n)
+        r.challenge, r.attempt = name, n
+        if n > 1:
+            self.say(f"   try {n} on this challenge" + (f" ({name})" if name else "")
+                     + (f"; wrong before: {[sorted(x) for x in self.failed_answers]}" if self.failed_answers else ""))
+
     # ------------------------------------------------------------------ one challenge, and the loop
     def solve_one(self, n):
         t0 = self.clock()
@@ -381,7 +413,11 @@ class Run:
         self.say(f"\n=== challenge {n} ===")
         try:
             img, st = self.reach_grid()
-            res, st, img = self.ask_solver(img, st)
+            self._which_challenge(r)
+            res = self._reuse_answer(st) if r.attempt > 1 else None
+            if res is None:
+                res, st, img = self.ask_solver(img, st)
+            self.last_answer = res
             r.target, r.tiles = res["target"], res["tiles"]
             if self.web is not None:
                 self.web.drain_results()             # only this challenge's result counts
@@ -396,6 +432,11 @@ class Run:
         except Exception as e:  # arm, camera, anything unexpected: stop, and the arm goes home on exit
             r.outcome, r.detail = "error", f"{type(e).__name__}: {e}"
         r.seconds = round(self.clock() - t0, 1)
+        self._last_outcome = r.outcome
+        if r.outcome == "fail" and r.tiles:
+            self.failed_answers.add(frozenset(r.tiles))
+        elif r.outcome in ("pass", "pass_unconfirmed"):
+            self.failed_answers = set()
         if hasattr(self.arm, "end_challenge"):      # learning arm: save the taps, refit the model
             taps = self.arm.end_challenge(r.outcome)
             if taps:
@@ -413,11 +454,16 @@ class Run:
     def run(self):
         self.out.mkdir(parents=True, exist_ok=True)
         results, errors_in_row = [], 0
-        for n in range(1, self.cfg.count + 1):
+        # training: --count = challenges SOLVED (a wrong answer is retried on the same challenge, so it can take
+        # several tries each); capped at 6 tries per wanted challenge so it always ends
+        limit = self.cfg.count * 6 if self.cfg.training else self.cfg.count
+        for n in range(1, limit + 1):
             r = self.solve_one(n)
             results.append(r)
             errors_in_row = errors_in_row + 1 if r.outcome in ("error", "unknown") else 0
             if self.cfg.training:                     # training: fails are data; stop only when stuck
+                if sum(x.outcome in ("pass", "pass_unconfirmed") for x in results) >= self.cfg.count:
+                    break
                 if errors_in_row >= 3:
                     self.say("3 challenges in a row went wrong (not just a wrong answer): stopping.")
                     break
@@ -429,7 +475,11 @@ class Run:
         passed = sum(r.outcome in ("pass", "pass_unconfirmed") for r in results)
         if self.cfg.training and results:
             fails = sum(r.outcome == "fail" for r in results)
-            self.say(f"\nTraining: {passed} passed, {fails} wrong answers, {len(results) - passed - fails} errors.")
+            self.say(f"\nTraining: {passed} solved, {fails} wrong answers (retried), {len(results) - passed - fails} errors.")
+            tries = [r.attempt for r in results if r.outcome in ("pass", "pass_unconfirmed")]
+            if tries:
+                self.say(f"Tries needed per solved challenge: " + ", ".join(map(str, tries))
+                         + f"  ({sum(t == 1 for t in tries)}/{len(tries)} first try)")
         self.say(f"\nDone: {passed}/{len(results)} passed" + (f" (of {self.cfg.count} planned)"
                                                           if len(results) < self.cfg.count else "")
                  + f".  Details: {self.out}")
@@ -465,6 +515,8 @@ class LearningArm:
             err = float(np.hypot((g["u"] - u) * w, (g["v"] - v) * h))
             r = self._reward(err, True, len(got), t.last_force_stop, self.tol)
             rec.update(err_px=round(err, 1), landed=[g["u"], g["v"]], el=g.get("el"), reward=r)
+            if getattr(t, "vision", None) is not None and t.last_hover_obs:
+                t.vision.learn(t.last_hover_obs, (g["u"], g["v"]))   # the cameras learn where the tip really was
             if t.last_touch_q is not None:
                 t.exp.add(t.last_touch_q, (g["u"], g["v"]), (u, v), r, t.press,
                           {"src": "captcha", "err_px": err, "el": g.get("el")})
@@ -488,10 +540,17 @@ class LearningArm:
         for x in taps:
             x["outcome"] = outcome
         self.t.exp.save()
+        if getattr(self.t, "vision", None) is not None and self.t.vision.enabled:
+            self.t.vision.save()
         if self.t.learned is not None:          # refit: the next challenge aims with what was just learned
             self.t.learned = self._LM(self.calib, self.t.exp)
             self.t.model.touch_pose = self.t.learned.touch_pose
         return taps
+
+
+def _challenge_name(web):
+    pg = web.page() if web is not None else None
+    return (pg or {}).get("challenge") or ""
 
 
 def _grid_state(img):
@@ -545,11 +604,16 @@ def main():
     p.add_argument("--simple-path", action="store_true")
     p.add_argument("--no-learned", action="store_true")
     p.add_argument("--no-correct", action="store_true")
+    p.add_argument("--cameras", default="", help="tip vision while tapping: the phone cameras, comma-separated ('none' = off)")
+    p.add_argument("--tip-color", default="pink")
+    p.add_argument("--screen-mm", type=float, default=300.0)
     a = p.parse_args()
 
-    from see import ScreenCamera
+    from see import open_screen_camera
     w, h = map(int, a.size.lower().split("x"))
-    cam = ScreenCamera(a.camera, w, h, a.cam_mode)
+    cam = open_screen_camera(a.camera, w, h, a.cam_mode)
+    if hasattr(cam, "describe"):
+        print("Screen " + cam.describe())
 
     if a.learn_layout:
         from learn_layout import learn
@@ -598,9 +662,16 @@ def main():
         if not a.port:
             raise SystemExit("--port is required (./lr passes it).")
         from tap import Tapper
+        vision = None
+        if a.cameras and a.cameras != "none":
+            from common import load_calib
+            from correction import calib_id
+            from tipvision import TipVision
+            vision = TipVision(a.cameras, a.tip_color, width_mm=a.screen_mm, cid=calib_id(load_calib()))
+            print(vision.describe())
         arm_ctx = Tapper(a.port, a.id, a.robot, a.lift, a.press, a.speed, smooth=a.smooth,
                          own_path=not a.simple_path, correct=not a.no_correct, dwell=a.dwell,
-                         max_load=a.max_load, torque=a.torque, learned=not a.no_learned)
+                         max_load=a.max_load, torque=a.torque, learned=not a.no_learned, vision=vision)
 
     if a.delay > 0:
         print(f"Starting in {a.delay:.0f} s: switch to the page on the touch screen (full-screen, F11)", flush=True)

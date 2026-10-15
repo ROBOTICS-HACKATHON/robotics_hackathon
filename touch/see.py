@@ -285,6 +285,60 @@ class ScreenCamera:
         return None
 
 
+class MultiScreenCamera:
+    """Several views of the same screen, best first: "screen_live.jpg,ipwebcam:A,ipwebcam:B".
+    The screenshot is pixel-exact, so it goes to the solver and locates the grid whenever it can see the
+    screen; the phones take over when it can't (capture stopped, page on another monitor). Every view is
+    straightened between the same 4 markers, so (u, v) means the same spot on the screen whichever view is used."""
+
+    def __init__(self, cameras, width=1280, height=800, cam_w=None, cam_h=None):
+        specs = [c.strip() for c in cameras.split(",") if c.strip()]
+        self.cams = []
+        for c in specs:
+            try:
+                self.cams.append(ScreenCamera(c, width, height, cam_w, cam_h))
+            except (SystemExit, Exception) as e:   # a view that can't open is skipped, not fatal
+                print(f"   (view {c} not available: {e})", flush=True)
+        if not self.cams:
+            raise SystemExit(f"None of the screen views could be opened: {cameras}")
+        self.width, self.height = width, height
+        self.src = self.cams[0].src
+        self.used = None
+
+    def frame(self):
+        return self.cams[0].frame()
+
+    def screen_image(self, tries=10, allow_remembered=True):
+        for i, cam in enumerate(self.cams):
+            if cam.src.kind == "file" and not _fresh(cam.src.spec):
+                continue                          # the screenshot stopped updating: an old picture is worse than none
+            img = cam.screen_image(tries if i == 0 else max(2, tries // 2), allow_remembered=allow_remembered)
+            if img is not None:
+                if self.used != cam.src.spec:
+                    if self.used is not None:
+                        print(f"   (view: now using {cam.src.spec})", flush=True)
+                    self.used = cam.src.spec
+                return img
+        return None
+
+    def describe(self):
+        return "views, best first: " + ", ".join(c.src.spec for c in self.cams)
+
+
+def _fresh(path, max_age=4.0):
+    try:
+        return time.time() - Path(path).stat().st_mtime <= max_age
+    except OSError:
+        return False
+
+
+def open_screen_camera(cameras, width=1280, height=800, cam_w=None, cam_h=None):
+    """One camera, or a comma-separated list of views (best first)."""
+    if "," in str(cameras):
+        return MultiScreenCamera(cameras, width, height, cam_w, cam_h)
+    return ScreenCamera(cameras, width, height, cam_w, cam_h)
+
+
 def check(cam, out):
     """Camera test: resolution, speed, markers."""
     t0 = time.time()
