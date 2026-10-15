@@ -15,6 +15,7 @@ copies it and holds the stylus) and a team of five.
 > real reCAPTCHA, Turnstile or any other service, and nothing here is meant for anyone else's website.
 
 ## Try it
+Deployed via Cloudflare:
 
 - **Demo website** (the captchas): https://robot-captcha-demo.pages.dev/
 - **Solver** (web UI and API; you enter your own Cloudflare Workers AI account ID and token in its Settings tab):
