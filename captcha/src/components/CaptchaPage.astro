@@ -207,7 +207,7 @@ const { demo = false } = Astro.props;
       dialog.style.setProperty('--robot-scale', '1');
       const w = dialog.offsetWidth, h = dialog.offsetHeight;
       if (!w || !h) return;
-      const s = Math.max(1, Math.min(2.2, (0.92 * window.innerWidth) / w, (0.96 * window.innerHeight) / (h + 36)));
+      const s = Math.max(1, Math.min(2.2, (0.92 * window.innerWidth) / w, (0.92 * window.innerHeight) / (h + 84)));
       dialog.style.setProperty('--robot-scale', s.toFixed(3));
     }
     if (robotSize) {
