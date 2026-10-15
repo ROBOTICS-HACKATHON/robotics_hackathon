@@ -163,16 +163,20 @@ class Tapper:
             why = follow_path(self.robot, down, 1.3 * t_down / self.speed, slow_end=0.25, guard=g, guard_from=0.6)
             approach_dir = (touch - down[-8]) * 4
         self.last_settle_err = None
+        # No instant touch signal (CAPTCHA runs, the robot link over the internet): nothing can say "touched,
+        # lift now", so press briefly and leave instead of pushing against the glass until a timeout.
+        blind = g.touch_event is None
         if not why:
             # not touched yet: push a little further, and make sure the stylus really arrives
             pressed = touch + approach_dir * self.press
             why = follow_path(self.robot, np.array([touch, pressed]), 0.15, guard=g, guard_from=0.0,
                               reset_guard=False)
             if not why:
-                self.last_settle_err, why = settle(self.robot, pressed, timeout=self.dwell + 0.8, guard=g)
+                self.last_settle_err, why = settle(self.robot, pressed, timeout=self.dwell + (0.05 if blind else 0.8),
+                                                   guard=g)
         self.last_stop = why
         self.last_force_stop, self.last_peak_load = why == "force", g.peak
-        if why != "touch" and self.vision is not None and self.vision.enabled:
+        if why != "touch" and self.vision is not None and self.vision.enabled and not blind:
             # no touch registered (yet): the cameras measure how far above the glass the tip stopped.
             # Taken during the dwell we wait anyway, so it costs no time.
             t0 = time.time()
@@ -182,7 +186,7 @@ class Tapper:
             time.sleep(max(0.0, self.dwell - (time.time() - t0)))
             why_wait = 0.0
         else:
-            why_wait = 0.05 if why == "touch" else self.dwell
+            why_wait = 0.05 if (why == "touch" or blind) else self.dwell
         # touched already: lift off almost right away (don't keep pressing); otherwise hold for dwell
         time.sleep(why_wait)
         # lift off from wherever the stylus actually is (never re-push to the taught pose)

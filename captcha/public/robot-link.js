@@ -19,6 +19,13 @@
   window.robotLink = { on: !!key, sent: 0, failed: 0 };
   if (!key) return;
   document.documentElement.dataset.robotLink = 'on';
+  // A stylus press that lasts a moment is "press and hold" on a Windows touch screen: it selects the text it is
+  // on (the checkbox label) or opens the context menu, and the click never happens. Neither is wanted here.
+  const noHold = document.createElement('style');
+  noHold.textContent = 'html[data-robot-link="on"], html[data-robot-link="on"] * { -webkit-user-select: none !important; user-select: none !important; -webkit-touch-callout: none !important; }';
+  document.head.appendChild(noHold);
+  document.addEventListener('contextmenu', (e) => e.preventDefault(), true);
+  document.addEventListener('selectstart', (e) => e.preventDefault(), true);
 
   const send = (body) => fetch('/api/touches', {
     method: 'POST', keepalive: true,
@@ -82,6 +89,7 @@
   };
   let lastScreen = '', lastSent = 0;
   const report = () => {
+    if (document.visibilityState !== 'visible') return;
     const s = screen();
     const j = JSON.stringify(s);
     if (j === lastScreen && Date.now() - lastSent < 10000) return;

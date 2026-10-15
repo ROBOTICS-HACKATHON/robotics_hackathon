@@ -332,6 +332,17 @@ class Run:
             raise RunError(f"The solver's Verify position is {off:.2f} grid-widths from the Verify button seen "
                            "in the photo. Not pressing it.")
         self.tap(vp["x_norm"], vp["y_norm"], "VERIFY")
+        # with the robot link we know where that tap landed: missed the button (or no touch) -> tap it again now,
+        # instead of waiting for an answer that can't come
+        for extra in range(2):
+            rec = (getattr(self.arm, "taps", None) or [None])[-1] if isinstance(self.arm, LearningArm) else None
+            if not isinstance(rec, dict) or rec.get("skipped"):
+                break
+            el = rec.get("el") or ""
+            if rec.get("touches") and "verify" in el:
+                break
+            self.say(f"   Verify missed ({'landed on ' + el if rec.get('touches') else 'no touch'}): tapping it again")
+            self.tap(vp["x_norm"], vp["y_norm"], "VERIFY again")
         self.home()
 
     # ------------------------------------------------------------------ 7. the site's answer
