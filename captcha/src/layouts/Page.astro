@@ -28,13 +28,24 @@ const training = Astro.url.pathname.startsWith('/training') || Astro.url.pathnam
         let down = null, nativeClick = false;
         // A bouncing stylus touches twice: two clicks on the same tile would tick it and untick it again.
         // A second click on the same control within BOUNCE_MS is dropped.
-        const BOUNCE_MS = 600;
+        // Also: one touch/pen press gives at most ONE click. On a Windows touch screen a longer press can produce
+        // two (one when the press is cancelled as "press and hold", one more when the pen lifts) - which ticks a
+        // tile and unticks it again, or opens the grid and then ticks the tile under the checkbox.
+        const BOUNCE_MS = 600, PRESS_MS = 2500;
         let lastClick = { el: null, t: 0 };
+        let press = { t: -1e9, clicks: 0 };
+        document.addEventListener('pointerdown', (e) => {
+          if (e.pointerType !== 'mouse' && e.isPrimary) press = { t: performance.now(), clicks: 0 };
+        }, true);
         document.addEventListener('click', (e) => {
           const el = e.target instanceof Element ? e.target.closest(CONTROL) : null;
-          if (!el) return;
+          if (!el || el.tagName === 'LABEL') return;   // a label forwards its click to its input: count that one
           const now = performance.now();
-          if (lastClick.el === el && now - lastClick.t < BOUNCE_MS) { e.stopImmediatePropagation(); e.preventDefault(); return; }
+          const samePress = now - press.t < PRESS_MS;
+          if ((samePress && press.clicks >= 1) || (lastClick.el === el && now - lastClick.t < BOUNCE_MS)) {
+            e.stopImmediatePropagation(); e.preventDefault(); return;
+          }
+          if (samePress) press.clicks += 1;
           lastClick = { el, t: now };
         }, true);
         document.addEventListener('click', () => { nativeClick = true; }, true);
