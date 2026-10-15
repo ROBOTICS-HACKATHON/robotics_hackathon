@@ -112,6 +112,11 @@ comparison, and a small web UI. It runs as a Cloudflare Worker plus container. Y
 A capacitive stylus is fixed in the follower's gripper. The arm knows nothing about captchas; it only knows how to **tap
 `(u, v)`**:
 
+<p align="center">
+  <img src="media/pen.jpeg" width="30%" alt="The capacitive stylus: a pen with a conductive tip, wrapped in black tape where the gripper holds it">
+  <br><em>The stylus the follower holds.</em>
+</p>
+
 - **Calibration (`./lr touch-calib`).** You drive the follower with the leader arm to nine dots on the screen: home, down to
   the dot, back up to home. The page reports the exact spot each touch landed. The arm stores the joint angles of every
   dot **and your whole movement**.
@@ -167,6 +172,11 @@ This is the self-training run in the media below. It needs no labels and no huma
 3. Correct the **joint angles** (not the screen position) using how the model says the joints move per unit of `u` and `v`,
    and tap again, up to 5 tries, until the miss is within the tolerance (15 px by default). Then the next target.
 4. After every target the model is refit from everything learned.
+
+<p align="center">
+  <img src="media/Training.gif" width="60%" alt="The robot arm practising by itself: it taps random targets on the touch screen and retries until it lands within tolerance">
+  <br><em>The arm training itself with <code>./lr practice</code>: tap, measure, correct, retry.</em>
+</p>
 
 What is learned, and where it is stored (`touch/experience.json`, per calibration, git-ignored):
 
