@@ -12,7 +12,7 @@
     "ACCESS_TEAM_DOMAIN": "",        // only for AUTH_MODE "access", e.g. "myteam.cloudflareaccess.com"
     "ACCESS_AUD": "",                // only for AUTH_MODE "access": the application's AUD tag
     "ALLOW_UNAUTHENTICATED_DEV": "false", // only ever "true" for `wrangler dev`
-    "ALLOWED_TEST_HOSTS": "skibidisigma67rizz.pages.dev", // hosts the test runner may visit
+    "ALLOWED_TEST_HOSTS": "robot-captcha-demo.pages.dev", // hosts the test runner may visit
     // "off" = no rate limits at all (the live demo: the robot calls often, with its own keys).
     // Set "on" if the URL is shared widely: the limits are what protect the container from abuse.
     "RATE_LIMITS": "off"

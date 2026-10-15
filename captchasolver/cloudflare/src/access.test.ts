@@ -171,6 +171,6 @@ test("rate limits are only switched off by an explicit RATE_LIMITS=off", () => {
   for (const v of [undefined, "", "on", "false", "0", "no"]) {
     assert.equal(containerEnv({ RATE_LIMITS: v }).CAPTCHASOLVER_RATE_LIMITS, "on", String(v));
   }
-  assert.equal(containerEnv({}).CAPTCHASOLVER_ALLOWED_HOSTS, "skibidisigma67rizz.pages.dev");
+  assert.equal(containerEnv({}).CAPTCHASOLVER_ALLOWED_HOSTS, "robot-captcha-demo.pages.dev");
   assert.equal(containerEnv({ ALLOWED_TEST_HOSTS: "a.example,b.example" }).CAPTCHASOLVER_ALLOWED_HOSTS, "a.example,b.example");
 });

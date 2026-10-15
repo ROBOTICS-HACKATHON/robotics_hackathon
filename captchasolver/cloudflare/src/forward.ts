@@ -62,7 +62,7 @@ export async function friendlyContainerError(resp: Response, accept: string): Pr
 /** Environment for the container, from the Worker's vars. Rate limits are on unless explicitly "off". */
 export function containerEnv(vars: { ALLOWED_TEST_HOSTS?: string; RATE_LIMITS?: string }): Record<string, string> {
   return {
-    CAPTCHASOLVER_ALLOWED_HOSTS: vars.ALLOWED_TEST_HOSTS?.trim() || "skibidisigma67rizz.pages.dev",
+    CAPTCHASOLVER_ALLOWED_HOSTS: vars.ALLOWED_TEST_HOSTS?.trim() || "robot-captcha-demo.pages.dev",
     CAPTCHASOLVER_RATE_LIMITS: vars.RATE_LIMITS?.trim().toLowerCase() === "off" ? "off" : "on",
   };
 }

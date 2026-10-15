@@ -10,7 +10,7 @@ from playwright.async_api import Page, TimeoutError as PWTimeout, async_playwrig
 from .client import WorkersAI
 from .grid import solve_tiles
 
-DEFAULT_URL = "https://skibidisigma67rizz.pages.dev/"
+DEFAULT_URL = "https://robot-captcha-demo.pages.dev/"
 CHALLENGE = "#image-challenge"
 
 
